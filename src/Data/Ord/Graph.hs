@@ -3,6 +3,8 @@
            , DeriveDataTypeable
            , TypeFamilies
            , FlexibleContexts
+           , FlexibleInstances
+           , MultiParamTypeClasses
            , RankNTypes
            , LambdaCase
            , TupleSections
@@ -105,10 +107,13 @@ overlayWith f (Graph v1 f1) (Graph v2 f2) =
 overlay :: Ord k => Graph k v e -> Graph k v e -> Graph k v e
 overlay = overlayWith const
 
-instance Ord k => Semigroup (Graph k v e)
 instance Ord k => Monoid (Graph k v e) where
   mempty = empty
   mappend = overlay
+
+instance Ord k => Semigroup (Graph k v e)
+instance AsEmpty (Graph k v e) where
+  _Empty = nearly empty (\g -> null (g ^. vertMap) && null (g ^. edgeMap))
 
 -- | Add a vertex at the key, or replace the vertex at that key.
 addVert :: Ord k => k -> v -> Graph k v e -> Graph k v e
@@ -219,6 +224,11 @@ fromDecomp = foldl (flip addCtxt) empty
 decomp :: (Ord k, Ord k')
        => Iso (Graph k v e) (Graph k' v' e') [Ctxt k v e] [Ctxt k' v' e']
 decomp = iso toDecomp fromDecomp
+
+instance (t ~ Graph k' v' e', Ord k) => Rewrapped (Graph k v e) t
+instance Ord k => Wrapped (Graph k v e) where
+  type Unwrapped (Graph k v e) = [Ctxt k v e]
+  _Wrapped' = decomp
 
 dfs :: (Ord k, Applicative f) =>
        (v -> f v') -> (e -> f e') -> Graph k v e -> f (Graph k v' e')
