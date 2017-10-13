@@ -20,6 +20,8 @@ import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
 
+import           Prelude hiding (reverse)
+
 data Graph k v e = Graph
   { _vertMap :: Map k v
   , _edgeMap :: Map k (Map k [e])
@@ -62,6 +64,10 @@ labEdgesFrom :: Ord k => Graph k v e -> k -> [(k, e)]
 labEdgesFrom g k = case M.lookup k (g ^. edgeMap) of
   Nothing -> []
   Just m -> concatMap (\(v, es) -> map (v,) es) (M.toList m)
+
+-- | The edges to the given key, labelled with their source key.
+labEdgesTo :: Ord k => Graph k v e -> k -> [(k, e)]
+labEdgesTo = labEdgesFrom . reverse
 
 -- | All edges in the graph, labelled with their source and target keys.
 allLabEdges :: Ord k => Graph k v e -> [(k, k, e)]
@@ -120,6 +126,11 @@ addEdge k1 k2 e g =
     where
       newIfNeeded m = if has _Nothing m then Just mempty else m
 
+-- | Delete all vertices that are equal to the given value.
+-- If a vertex is removed, its key and all corresponding edges are also removed.
+delVert :: (Eq v, Ord k) => v -> Graph k v e -> Graph k v e
+delVert v = filterVerts (not . (==) v)
+
 -- | Remove all edges occurring between two keys.
 delEdges :: Ord k => k -> k -> Graph k v e -> Graph k v e
 delEdges k1 k2 g = g & edgeMap . at k1 . _Just %~ M.delete k2
@@ -143,12 +154,18 @@ delKey k g = g & vertMap %~ M.delete k
                & edgeMap . traverse %~ M.delete k
                & edgeMap %~ cleanup
 
+-- | Filter the vertices in the graph by the given predicate.
+-- If a vertex is removed, its key and all corresponding edges are also removed.
+filterVerts :: Ord k => (v -> Bool) -> Graph k v e -> Graph k v e
+filterVerts p g = foldr (\(k, v) g' -> if not (p v) then delKey k g' else g') g (allLabVerts g)
+
+-- | Filter the edges in the graph by the given predicate.
+filterEdges :: Ord k => (e -> Bool) -> Graph k v e -> Graph k v e
+filterEdges p g = foldr (\(k1, k2, _) -> delEdgeBy (not . p) k1 k2) g (allLabEdges g)
+
 -- | Filter the keys in the graph by the given predicate.
 filterKeys :: Ord k => (k -> Bool) -> Graph k v e -> Graph k v e
 filterKeys p g = foldr delKey g (filter (not . p) (keys g))
-
--- filterEdges :: Ord k => (e -> Bool) -> Graph k v e -> Graph k v e
--- filterEdges
 
 -- | Remove all empty entries in a map.
 cleanup :: (Ord k, Foldable t) => Map k (t a) -> Map k (t a)
@@ -166,6 +183,24 @@ mapKeys :: Ord k' => (k -> k') -> Graph k v e -> Graph k' v e
 mapKeys f (Graph vs fs) =
   Graph (M.mapKeys f vs)
         (M.mapKeys f $ fmap (M.mapKeys f) fs)
+
+-- | Reverse the direction of all edges in the graph.
+reverse :: Ord k => Graph k v e -> Graph k v e
+reverse g = foldr (\(k1, k2, e) -> addEdge k2 k1 e) init (allLabEdges g)
+  where
+    init = Graph (g ^. vertMap) M.empty
+
+-- | Decompose the graph into the context about the given key/vertex and
+-- the remainder of the graph not in the context.
+decompose :: Ord k => k -> v -> Graph k v e -> (Ctxt k v e, Graph k v e)
+decompose k v g =
+  (Ctxt (labEdgesTo g k) (k, v) (labEdgesFrom g k), delKey k g)
+
+-- | A full decomposition of the graph into contexts.
+decomposition :: Ord k => Graph k v e -> [Ctxt k v e]
+decomposition g = fst $ foldr (\(k, v) (cs, g') ->
+                                  let (c, g'') = decompose k v g'
+                                  in (c : cs, g'')) ([], g) (allLabVerts g)
 
 dfs :: (Ord k, Applicative f) =>
        (v -> f v') -> (e -> f e') -> Graph k v e -> f (Graph k v' e')
@@ -188,4 +223,6 @@ test =
       g4 = addEdge 0 1 4.3 g3
       g5 = addEdge 0 1 7.7 g4
       g6 = addEdge 1 0 5.1 g5
-  in g6
+      g7 = addEdge 2 0 17.4 g6
+      g8 = addEdge 1 2 1.2 g7
+  in g8
