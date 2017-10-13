@@ -25,7 +25,7 @@ import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
 
-import           Prelude hiding (reverse)
+import           Prelude as P hiding (reverse)
 
 data Graph k e v = Graph
   { _vertMap :: Map k v
@@ -327,28 +327,74 @@ itravEdges f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
 instance Bifunctor (Graph k) where
   bimap fe fv = mapVerts fv . mapEdges fe
 
--- instance Bifoldable (Graph k) where
+instance Bifoldable (Graph k) where
 
-dfs :: forall k e v e' v' f. (Ord k, Applicative f) =>
-    (e -> f e') -> (v -> f v') -> Graph k e v -> f (Graph k e' v')
-dfs fe fv g = evalState dfs' S.empty
+instance Ord k => Bitraversable (Graph k) where
+  bitraverse = dfs
+
+dfs :: (Applicative f, Ord k) => (e -> f e') -> (v -> f v')
+    -> Graph k e v -> f (Graph k e' v')
+dfs fe fv = idfs (\k1 k2 -> fe) (const fv)
+
+idfs :: (Applicative f, Ord k)
+     => (k -> k -> e -> f e')
+     -> (k -> v -> f v')
+     -> Graph k e v -> f (Graph k e' v')
+idfs fe fv g = promoteActions fe fv (dfs' g)
+
+idfsFrom :: (Applicative f, Ord k)
+         => k
+         -> (k -> k -> e -> f e')
+         -> (k -> v -> f v')
+         -> Graph k e v -> f (Graph k e' v')
+idfsFrom = undefined
+
+-- | To simplify the implementation of traversals, we record the order in which
+--
+data Action k e v
+  = Vert k v
+  | Edge k k e
+  deriving (Show, Read, Eq, Ord, Data)
+
+promoteActions :: (Ord k, Applicative f)
+               => (k -> k -> e -> f e')
+               -> (k -> v -> f v')
+               -> [Action k e v] -> f (Graph k e' v')
+promoteActions fe fv acs = construct <$> traverse flat acs
   where
-    dfs' =
+    flat (Vert k v) = Vert k <$> fv k v
+    flat (Edge k k' e) = Edge k k' <$> fe k k' e
+    act (Vert k v) = addVert k v
+    act (Edge k k' e) = addEdge k k' e
+    part (v@Vert{} : rest) (vs, es) = part rest (v:vs, es)
+    part (e@Edge{} : rest) (vs, es) = part rest (vs, e:es)
+    part [] acc = acc
+    construct acs =
+      let (vs, es) = part acs ([], [])
+      in foldr act (foldr act empty vs) es
 
-    -- from :: (Applicative f, Ord k) => k -> State (Set k) (f (Graph k e' v'))
-    from k = do
-      s <- get
-      if k `elem` s then undefined
-      else do
-        modify (S.insert k)
-        let es = labEdgesFrom g k
-        gs' <- traverse (\(k', e) -> from k') es
-        let g' = mconcat <$> sequenceA gs'
-        let g'' = case g ^. vert k of
-                    Nothing -> g'
-                    Just v -> addVert k <$> fv v <*> g'
-        return g''
-        -- (fmap . fmap) mconcat gs'
+dfs' :: Ord k => Graph k e v -> [Action k e v]
+dfs' g = fst (execState f ([], S.empty)) ^. reversed
+  where
+    ks = keysSet g
+    f = do
+      s <- use _2
+      let s' = S.difference ks s
+      if null s' then return ()
+      else dfsFrom' (S.findMin s') g
+
+dfsFrom' :: Ord k => k -> Graph k e v -> State ([Action k e v], Set k) ()
+dfsFrom' k g = do
+  s <- use _2
+  if k `elem` s then return ()
+  else case g ^. at k of
+    Nothing -> return ()
+    Just v -> do
+      _2 %= S.insert k
+      _1 %= (Vert k v:)
+      mapM_ (\(k', e) -> do
+        _1 %= (Edge k k' e:)
+        dfsFrom' k' g) (labEdgesFrom g k)
 
 test =
   let g1 = addVert 0 "hello" empty
@@ -360,3 +406,6 @@ test =
       g7 = addEdge 2 0 17.4 g6
       g8 = addEdge 1 2 1.2 g7
   in g8
+
+emit = bitraverse (\e -> print e >> return e)
+                  (\v -> print v >> return v)
