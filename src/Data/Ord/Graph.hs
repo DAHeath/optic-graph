@@ -24,6 +24,7 @@ import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
+import           Data.List (partition)
 
 import           Prelude as P hiding (reverse)
 
@@ -324,6 +325,14 @@ itravVerts = itraverse
 itravEdges :: Applicative f => (k -> k -> e -> f e') -> Graph k e v -> f (Graph k e' v)
 itravEdges f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
 
+-- | To simplify the implementation of traversals, we record the order in which
+--
+data Action k e v
+  = Vert k v
+  | Edge k k e
+  deriving (Show, Read, Eq, Ord, Data)
+makePrisms ''Action
+
 instance Bifunctor (Graph k) where
   bimap fe fv = mapVerts fv . mapEdges fe
 
@@ -332,58 +341,60 @@ instance Bifoldable (Graph k) where
 instance Ord k => Bitraversable (Graph k) where
   bitraverse = dfs
 
-dfs :: (Applicative f, Ord k) => (e -> f e') -> (v -> f v')
-    -> Graph k e v -> f (Graph k e' v')
+type Bitraversal s t a b c d =
+  forall f. Applicative f => (a -> f b) -> (c -> f d) -> s -> f t
+
+-- | The subgraph reached from the given key.
+reached :: Ord k => k -> Graph k e v -> Graph k e v
+reached k = runIdentity . dfsFrom Identity Identity k
+
+-- | The subgraph that reaches the given key.
+reaches :: Ord k => k -> Graph k e v -> Graph k e v
+reaches k = reached k . reverse
+
+-- | Depth first and breadth first bitraversals of the graph.
+dfs, bfs :: Ord k => Bitraversal (Graph k e v) (Graph k e' v') e e' v v'
 dfs fe fv = idfs (\k1 k2 -> fe) (const fv)
+bfs fe fv = ibfs (\k1 k2 -> fe) (const fv)
 
-idfs :: (Applicative f, Ord k)
-     => (k -> k -> e -> f e')
-     -> (k -> v -> f v')
-     -> Graph k e v -> f (Graph k e' v')
-idfs fe fv g = promoteActions fe fv (dfs' g)
+-- | Depth first and breadth first indexed bitraversals of the graph.
+idfs, ibfs :: (Applicative f, Ord k)
+           => (k -> k -> e -> f e')
+           -> (k -> v -> f v')
+           -> Graph k e v -> f (Graph k e' v')
+idfs fe fv = travActs fe fv dfs'
+ibfs fe fv = travActs fe fv bfs'
 
-idfsFrom :: (Applicative f, Ord k)
-         => k
-         -> (k -> k -> e -> f e')
-         -> (k -> v -> f v')
-         -> Graph k e v -> f (Graph k e' v')
-idfsFrom = undefined
+-- | Perform a depth first/breadth first bitraversal of the subgraph reachable
+-- from the key. Note that these are not law abiding traversals unless the
+-- choice of key has a source vertex.
+dfsFrom, bfsFrom :: (Applicative f, Ord k)
+                 => (e -> f e')
+                 -> (v -> f v')
+                 -> k -> Graph k e v -> f (Graph k e' v')
+dfsFrom fe fv = idfsFrom (\k1 k2 -> fe) (const fv)
+bfsFrom fe fv = ibfsFrom (\k1 k2 -> fe) (const fv)
 
--- | To simplify the implementation of traversals, we record the order in which
---
-data Action k e v
-  = Vert k v
-  | Edge k k e
-  deriving (Show, Read, Eq, Ord, Data)
+-- | Perform a depth first/breadth first indexed bitraversal of the subgraph
+-- reachable from the key. Note that these are not law abiding traversals unless
+-- the choice of key has a source vertex.
+idfsFrom, ibfsFrom :: (Applicative f, Ord k)
+                   => (k -> k -> e -> f e')
+                   -> (k -> v -> f v')
+                   -> k -> Graph k e v -> f (Graph k e' v')
+idfsFrom fe fv k = travActs fe fv (dfsFrom' k)
+ibfsFrom fe fv k = travActs fe fv (bfsFrom' k)
 
-promoteActions :: (Ord k, Applicative f)
-               => (k -> k -> e -> f e')
-               -> (k -> v -> f v')
-               -> [Action k e v] -> f (Graph k e' v')
-promoteActions fe fv acs = construct <$> traverse flat acs
-  where
-    flat (Vert k v) = Vert k <$> fv k v
-    flat (Edge k k' e) = Edge k k' <$> fe k k' e
-    act (Vert k v) = addVert k v
-    act (Edge k k' e) = addEdge k k' e
-    part (v@Vert{} : rest) (vs, es) = part rest (v:vs, es)
-    part (e@Edge{} : rest) (vs, es) = part rest (vs, e:es)
-    part [] acc = acc
-    construct acs =
-      let (vs, es) = part acs ([], [])
-      in foldr act (foldr act empty vs) es
+-- | Stateful computations which calculate the actions needed to perform a
+-- depth first/breadth first traversal of the graph.
+dfs', bfs' :: Ord k => Graph k e v -> State ([Action k e v], Set k) ()
+dfs' = promoteFrom dfsFrom'
+bfs' = promoteFrom bfsFrom'
 
-dfs' :: Ord k => Graph k e v -> [Action k e v]
-dfs' g = fst (execState f ([], S.empty)) ^. reversed
-  where
-    ks = keysSet g
-    f = do
-      s <- use _2
-      let s' = S.difference ks s
-      if null s' then return ()
-      else dfsFrom' (S.findMin s') g
-
-dfsFrom' :: Ord k => k -> Graph k e v -> State ([Action k e v], Set k) ()
+-- | Stateful computations which calculate the actions needed to perform a
+-- depth first/breadth first traversal of the subgraph reached from a
+-- particular key.
+dfsFrom', bfsFrom' :: Ord k => k -> Graph k e v -> State ([Action k e v], Set k) ()
 dfsFrom' k g = do
   s <- use _2
   if k `elem` s then return ()
@@ -395,6 +406,53 @@ dfsFrom' k g = do
       mapM_ (\(k', e) -> do
         _1 %= (Edge k k' e:)
         dfsFrom' k' g) (labEdgesFrom g k)
+bfsFrom' start g = knock start >> enter start
+  where
+    knock k = do
+      s <- use _2
+      if k `elem` s then return []
+      else case g ^. at k of
+        Nothing -> return []
+        Just v -> do
+          _2 %= S.insert k
+          _1 %= (Vert k v:)
+          return [k]
+    enter k = do
+      ks <- mapM (\(k', e) -> do
+        _1 %= (Edge k k' e:)
+        knock k') (labEdgesFrom g k)
+      mapM_ enter (concat ks)
+
+-- | Promote a partial traversal (which only reaches a portion of the graph) to
+-- a full traversal by repeatedly invoking the partial traversal on non-visited
+-- keys.
+promoteFrom :: Ord k
+            => (k -> Graph k e v -> State ([Action k e v], Set k) ())
+            -> Graph k e v -> State ([Action k e v], Set k) ()
+promoteFrom fr g = do
+  let ks = keysSet g
+  s <- use _2
+  let s' = S.difference ks s
+  if null s' then return ()
+  else fr (S.findMin s') g
+
+-- | Promote a stateful generator of graph actions to a indexed bitraversal.
+travActs :: (Ord k, Applicative f)
+         => (k -> k -> e -> f e')
+         -> (k -> v -> f v')
+         -> (Graph k e v -> State ([Action k e v], Set k) ())
+         -> Graph k e v -> f (Graph k e' v')
+travActs fe fv trav g =
+  let acs = fst (execState (trav g) ([], S.empty)) ^. reversed
+  in construct <$> traverse flat acs
+  where
+    flat (Vert k v) = Vert k <$> fv k v
+    flat (Edge k k' e) = Edge k k' <$> fe k k' e
+    act (Vert k v) = addVert k v
+    act (Edge k k' e) = addEdge k k' e
+    construct acs =
+      let (vs, es) = partition (has _Vert) acs
+      in foldr act (foldr act empty vs) es
 
 test =
   let g1 = addVert 0 "hello" empty
@@ -403,9 +461,11 @@ test =
       g4 = addEdge 0 1 4.3 g3
       g5 = addEdge 0 1 7.7 g4
       g6 = addEdge 1 0 5.1 g5
-      g7 = addEdge 2 0 17.4 g6
-      g8 = addEdge 1 2 1.2 g7
-  in g8
+      g7 = addEdge 1 2 1.2 g6
+  in g7
 
 emit = bitraverse (\e -> print e >> return e)
                   (\v -> print v >> return v)
+
+emit' = ibfsFrom (\k1 k2 e -> print k1 >> print k2 >> print e)
+                 (\k e -> print k >> print e)
