@@ -196,11 +196,29 @@ decompose :: Ord k => k -> v -> Graph k v e -> (Ctxt k v e, Graph k v e)
 decompose k v g =
   (Ctxt (labEdgesTo g k) (k, v) (labEdgesFrom g k), delKey k g)
 
+-- | Add the vertex and edges described by the context to the graph. Note that
+-- if the context describes edges to/from keys which are not in the graph already
+-- then those edges will not be added.
+addCtxt :: Ord k => Ctxt k v e -> Graph k v e -> Graph k v e
+addCtxt (Ctxt bef (k, v) aft) g =
+  foldr (uncurry (k `addEdge`))
+    (foldr (uncurry (`addEdge` k)) (addVert k v g) bef)
+    aft
+
 -- | A full decomposition of the graph into contexts.
-decomposition :: Ord k => Graph k v e -> [Ctxt k v e]
-decomposition g = fst $ foldr (\(k, v) (cs, g') ->
+toDecomp :: Ord k => Graph k v e -> [Ctxt k v e]
+toDecomp g = fst $ foldr (\(k, v) (cs, g') ->
                                   let (c, g'') = decompose k v g'
                                   in (c : cs, g'')) ([], g) (allLabVerts g)
+
+-- | Construct a graph from a decomposition.
+fromDecomp :: Ord k => [Ctxt k v e] -> Graph k v e
+fromDecomp = foldl (flip addCtxt) empty
+
+-- | The isomorphism between graphs and their decompositions.
+decomp :: (Ord k, Ord k')
+       => Iso (Graph k v e) (Graph k' v' e') [Ctxt k v e] [Ctxt k' v' e']
+decomp = iso toDecomp fromDecomp
 
 dfs :: (Ord k, Applicative f) =>
        (v -> f v') -> (e -> f e') -> Graph k v e -> f (Graph k v' e')
@@ -216,6 +234,7 @@ dfs fv fe g = evalState dfs' S.empty
         let es = labEdgesFrom k
         traverse
 
+test :: Graph Int String Double
 test =
   let g1 = addVert 0 "hello" empty
       g2 = addVert 1 "world" g1
