@@ -1,19 +1,53 @@
-{-# LANGUAGE ApplicativeDo
-           , TemplateHaskell
+{-# LANGUAGE TemplateHaskell
            , DeriveDataTypeable
            , TypeFamilies
            , FlexibleContexts
            , FlexibleInstances
+           , UndecidableInstances
            , MultiParamTypeClasses
            , RankNTypes
-           , LambdaCase
-           , TupleSections
            , NoMonomorphismRestriction
            #-}
-module Data.Ord.Graph where
+module Data.Ord.Graph
+  ( Graph(..), vertMap, edgeMap
+  , Ctxt(..), before, here, after
+  , vert, allVerts, allLabVerts
+  , edges, edgesFrom, allEdges, labEdgesTo, labEdgesFrom, allLabEdges
+  , keys, keysSet
+  , empty, union, unionWith
+  , order, size
+  , addVert, addEdge
+  , delVert
+  , delEdges, delEdgeBy, delEdge, idelEdgeBy
+  , delKey
+  , filterVerts, ifilterVerts
+  , filterEdges, ifilterEdges
+  , filterKeys
+  , reverse
+  , EdgeFocused(..), edgeFocused
+  , mapVerts, imapVerts
+  , mapEdges, imapEdges
+  , mapKeys
+  , foldVerts, ifoldVerts
+  , foldEdges, ifoldEdges
+  , foldKeys
+  , travVerts, itravVerts
+  , travEdges, itravEdges
+  , travKeys
+  , reaches, reached
+  , dfs, bfs
+  , idfs, ibfs, ibitraverse
+  , idfsFrom, ibfsFrom
+  , match, addCtxt
+  , toDecomp, fromDecomp, decomp
+  )
+
+
+  where
 
 import           Control.Lens
 import           Control.Monad.State
+-- import           Control.Monad
 
 import           Data.Bifunctor
 import           Data.Bifoldable
@@ -36,10 +70,18 @@ makeLenses ''Graph
 
 data Ctxt k e v = Ctxt
   { _before :: [(k, e)]
-  , _here :: (k, v)
+  , _here :: v
   , _after :: [(k, e)]
   } deriving (Show, Read, Eq, Ord, Data)
 makeLenses ''Ctxt
+
+-- | To simplify the implementation of traversals, we record the order in which
+-- the graph short be modified.
+data Action k e v
+  = Vert k v
+  | Edge k k e
+  deriving (Show, Read, Eq, Ord, Data)
+makePrisms ''Action
 
 -- | A lens which selects the vertex at the key (if it exists).
 vert :: Ord k => k -> Lens' (Graph k e v) (Maybe v)
@@ -65,15 +107,15 @@ edgesFrom k = edgeMap . at k . _Just . traverse . traverse
 allEdges :: Traversal' (Graph k e v) e
 allEdges = edgeMap . traverse . traverse . traverse
 
+-- | The edges to the given key, labelled with their source key.
+labEdgesTo :: Ord k => Graph k e v -> k -> [(k, e)]
+labEdgesTo = labEdgesFrom . reverse
+
 -- | The edges from the given key, labelled with their target key.
 labEdgesFrom :: Ord k => Graph k e v -> k -> [(k, e)]
 labEdgesFrom g k = case M.lookup k (g ^. edgeMap) of
   Nothing -> []
-  Just m -> concatMap (\(v, es) -> map (v,) es) (M.toList m)
-
--- | The edges to the given key, labelled with their source key.
-labEdgesTo :: Ord k => Graph k e v -> k -> [(k, e)]
-labEdgesTo = labEdgesFrom . reverse
+  Just m -> concatMap (\(v, es) -> map (\e -> (v, e)) es) (M.toList m)
 
 -- | All edges in the graph, labelled with their source and target keys.
 allLabEdges :: Ord k => Graph k e v -> [(k, k, e)]
@@ -93,25 +135,33 @@ keysSet = M.keysSet . view vertMap
 empty :: Graph k e v
 empty = Graph M.empty M.empty
 
+-- | Combine two graphs. If both graph have a vertex at the same key, use the
+-- vertex label from the first graph.
+union :: Ord k => Graph k e v -> Graph k e v -> Graph k e v
+union = unionWith const
+
 -- | Combine two graphs. If both graphs have a vertex at the same key, use the
 -- provided function to decide how to generate the new vertex at the key.
-overlayWith :: Ord k => (v -> v -> v) -> Graph k e v -> Graph k e v -> Graph k e v
-overlayWith f (Graph v1 f1) (Graph v2 f2) =
+unionWith :: Ord k => (v -> v -> v) -> Graph k e v -> Graph k e v -> Graph k e v
+unionWith f (Graph v1 f1) (Graph v2 f2) =
   Graph (M.unionWith f v1 v2)
         (M.unionWith (M.unionWith (++)) f1 f2)
 
--- | Combine two graphs. If both graph have a vertex at the same key, use the
--- vertex label from the first graph.
-overlay :: Ord k => Graph k e v -> Graph k e v -> Graph k e v
-overlay = overlayWith const
-
 instance Ord k => Monoid (Graph k e v) where
   mempty = empty
-  mappend = overlay
+  mappend = union
 
 instance Ord k => Semigroup (Graph k e v)
 instance AsEmpty (Graph k e v) where
   _Empty = nearly empty (\g -> null (g ^. vertMap) && null (g ^. edgeMap))
+
+-- | The number of vertices in the graph.
+order :: Integral i => Graph k e v -> i
+order g = toEnum $ length (g ^. vertMap)
+
+-- | The number of edges in the graph
+size :: Integral i => Graph k e v -> i
+size g = toEnum $ length (g ^.. allEdges)
 
 -- | Add a vertex at the key, or replace the vertex at that key.
 addVert :: Ord k => k -> v -> Graph k e v -> Graph k e v
@@ -141,7 +191,12 @@ delEdges k1 k2 g = g & edgeMap . at k1 . _Just %~ M.delete k2
 
 -- | Delete any edges between the two keys which satisfy the predicate.
 delEdgeBy :: Ord k => (e -> Bool) -> k -> k -> Graph k e v -> Graph k e v
-delEdgeBy p k1 k2 g = g & edgeMap . at k1 . _Just . at k2 . _Just %~ filter (not . p)
+delEdgeBy p = idelEdgeBy (\k1 k2 -> p)
+
+-- | Delete any edges between the two keys which satisfy the predicate which also
+-- takes the edge keys as additional arguments.
+idelEdgeBy :: Ord k => (k -> k -> e -> Bool) -> k -> k -> Graph k e v -> Graph k e v
+idelEdgeBy p k1 k2 g = g & edgeMap . at k1 . _Just . at k2 . _Just %~ filter (not . p k1 k2)
                         & edgeMap . at k1 . _Just %~ clearEntry k2
                         & edgeMap %~ clearEntry k1
 
@@ -160,11 +215,26 @@ delKey k g = g & vertMap %~ M.delete k
 -- | Filter the vertices in the graph by the given predicate.
 -- If a vertex is removed, its key and all corresponding edges are also removed.
 filterVerts :: Ord k => (v -> Bool) -> Graph k e v -> Graph k e v
-filterVerts p g = foldr (\(k, v) g' -> if not (p v) then delKey k g' else g') g (allLabVerts g)
+filterVerts p g =
+  foldr (\(k, v) g' -> if not (p v) then delKey k g' else g') g (allLabVerts g)
+
+-- | Filter the vertices in the graph by the given predicate which also takes the
+-- vertex key as an argument.
+-- If a vertex is removed, its key and all corresponding edges are also removed.
+ifilterVerts :: Ord k => (k -> v -> Bool) -> Graph k e v -> Graph k e v
+ifilterVerts p g =
+  foldr (\(k, v) g' -> if not (p k v) then delKey k g' else g') g (allLabVerts g)
 
 -- | Filter the edges in the graph by the given predicate.
 filterEdges :: Ord k => (e -> Bool) -> Graph k e v -> Graph k e v
-filterEdges p g = foldr (\(k1, k2, _) -> delEdgeBy (not . p) k1 k2) g (allLabEdges g)
+filterEdges p g =
+  foldr (\(k1, k2, _) -> delEdgeBy (not . p) k1 k2) g (allLabEdges g)
+
+-- | Filter the edges in the graph by the given predicate which also takes the
+-- edge keys as additional arguments.
+ifilterEdges :: Ord k => (k -> k-> e -> Bool) -> Graph k e v -> Graph k e v
+ifilterEdges p g =
+  foldr (\(k1, k2, _) -> idelEdgeBy (\k1 k2 e -> not $ p k1 k2 e) k1 k2) g (allLabEdges g)
 
 -- | Filter the keys in the graph by the given predicate.
 filterKeys :: Ord k => (k -> Bool) -> Graph k e v -> Graph k e v
@@ -178,15 +248,6 @@ cleanup m = foldr clearEntry m (M.keys m)
 clearEntry :: (Foldable t, Ord k) => k -> Map k (t a) -> Map k (t a)
 clearEntry k m = maybe m (\m' -> if null m' then M.delete k m else m) (M.lookup k m)
 
--- | The map obtained by applying f to each key of s.
--- The size of the result may be smaller if f maps two or more distinct keys to
--- the same new key. In this case the value at the greatest of the original keys
--- is retained.
-mapKeys :: Ord k' => (k -> k') -> Graph k e v -> Graph k' e v
-mapKeys f (Graph vs fs) =
-  Graph (M.mapKeys f vs)
-        (M.mapKeys f $ fmap (M.mapKeys f) fs)
-
 -- | Reverse the direction of all edges in the graph.
 reverse :: Ord k => Graph k e v -> Graph k e v
 reverse g = foldr (\(k1, k2, e) -> addEdge k2 k1 e) init (allLabEdges g)
@@ -196,41 +257,6 @@ reverse g = foldr (\(k1, k2, e) -> addEdge k2 k1 e) init (allLabEdges g)
 instance Ord k => Reversing (Graph k e v) where
   reversing = reverse
 
--- | Decompose the graph into the context about the given key/vertex and
--- the remainder of the graph not in the context.
-decompose :: Ord k => k -> v -> Graph k e v -> (Ctxt k e v, Graph k e v)
-decompose k v g =
-  (Ctxt (labEdgesTo g k) (k, v) (labEdgesFrom g k), delKey k g)
-
--- | Add the vertex and edges described by the context to the graph. Note that
--- if the context describes edges to/from keys which are not in the graph already
--- then those edges will not be added.
-addCtxt :: Ord k => Ctxt k e v -> Graph k e v -> Graph k e v
-addCtxt (Ctxt bef (k, v) aft) g =
-  foldr (uncurry (k `addEdge`))
-    (foldr (uncurry (`addEdge` k)) (addVert k v g) bef)
-    aft
-
--- | A full decomposition of the graph into contexts.
-toDecomp :: Ord k => Graph k e v -> [Ctxt k e v]
-toDecomp g = fst $ foldr (\(k, v) (cs, g') ->
-                                  let (c, g'') = decompose k v g'
-                                  in (c : cs, g'')) ([], g) (allLabVerts g)
-
--- | Construct a graph from a decomposition.
-fromDecomp :: Ord k => [Ctxt k e v] -> Graph k e v
-fromDecomp = foldl (flip addCtxt) empty
-
--- | The isomorphism between graphs and their decompositions.
-decomp :: (Ord k, Ord k')
-       => Iso (Graph k e v) (Graph k' e' v') [Ctxt k e v] [Ctxt k' e' v']
-decomp = iso toDecomp fromDecomp
-
-instance (t ~ Graph k' v' e', Ord k) => Rewrapped (Graph k e v) t
-instance Ord k => Wrapped (Graph k e v) where
-  type Unwrapped (Graph k e v) = [Ctxt k e v]
-  _Wrapped' = decomp
-
 instance Functor (Graph k e) where
   fmap f = vertMap %~ fmap f
 
@@ -239,6 +265,9 @@ instance Foldable (Graph k e) where
 
 instance Traversable (Graph k e) where
   traverse = traverseOf (vertMap . traverse)
+
+instance (k ~ k', e ~ e') => Each (Graph k e v) (Graph k' e' v') v v' where
+  each = traversed
 
 instance FunctorWithIndex k (Graph k e)
 instance FoldableWithIndex k (Graph k e)
@@ -271,6 +300,9 @@ instance Foldable (EdgeFocused k v) where
 instance Traversable (EdgeFocused k v) where
   traverse = traverseOf (from edgeFocused . edgeMap . traverse . traverse . traverse)
 
+instance (k ~ k', v ~ v') => Each (EdgeFocused k v e) (EdgeFocused k' v' e') e e' where
+  each = traversed
+
 instance FunctorWithIndex (k, k) (EdgeFocused k v)
 instance FoldableWithIndex (k, k) (EdgeFocused k v)
 instance TraversableWithIndex (k, k) (EdgeFocused k v) where
@@ -283,60 +315,86 @@ instance TraversableWithIndex (k, k) (EdgeFocused k v) where
 mapVerts :: (v -> v') -> Graph k e v -> Graph k e v'
 mapVerts = fmap
 
--- | Apply the given function to all edges.
-mapEdges :: (e -> e') -> Graph k e v -> Graph k e' v
-mapEdges = under (from edgeFocused) . fmap
-
 -- | Apply the given function to all vertices, taking each vertex's key as an
 -- additional argument.
 imapVerts :: (k -> v -> v') -> Graph k e v -> Graph k e v'
 imapVerts = imap
+
+-- | Apply the given function to all edges.
+mapEdges :: (e -> e') -> Graph k e v -> Graph k e' v
+mapEdges = under (from edgeFocused) . fmap
 
 -- | Apply the given function to all edges, taking each edge's keys as
 -- additional arguments.
 imapEdges :: (k -> k -> e -> e') -> Graph k e v -> Graph k e' v
 imapEdges = under (from edgeFocused) . imap . uncurry
 
+-- | The map obtained by applying f to each key of s.
+-- The size of the result may be smaller if f maps two or more distinct keys to
+-- the same new key. In this case the value at the greatest of the original keys
+-- is retained.
+mapKeys :: Ord k' => (k -> k') -> Graph k e v -> Graph k' e v
+mapKeys f (Graph vs es) =
+  Graph (M.mapKeys f vs)
+        (M.mapKeys f $ fmap (M.mapKeys f) es)
+
 -- | Aggregate the vertices.
 foldVerts :: (v -> b -> b) -> b -> Graph k e v -> b
 foldVerts = foldr
-
--- | Aggregate the edges.
-foldEdges :: (e -> b -> b) -> b -> Graph k e v -> b
-foldEdges f acc g = foldr f acc (EdgeFocused g)
 
 -- | Aggregate the vertices with vertex keys as an additional argument.
 ifoldVerts :: (k -> v -> b -> b) -> b -> Graph k e v -> b
 ifoldVerts = ifoldr
 
+-- | Aggregate the edges.
+foldEdges :: (e -> b -> b) -> b -> Graph k e v -> b
+foldEdges f acc g = foldr f acc (EdgeFocused g)
+
 -- | Aggregate the edges with edge keys as an additional arguments.
 ifoldEdges :: (k -> k -> e -> b -> b) -> b -> Graph k e v -> b
 ifoldEdges f acc g = ifoldr (uncurry f) acc (EdgeFocused g)
 
+-- | Aggregate the keys.
+foldKeys :: (k -> b -> b) -> b -> Graph k e v -> b
+foldKeys f acc g = foldr f acc (keys g)
+
+-- | Traverse the vertices.
 travVerts :: Applicative f => (v -> f v') -> Graph k e v -> f (Graph k e v')
 travVerts = traverse
 
-travEdges :: Applicative f => (e -> f e') -> Graph k e v -> f (Graph k e' v)
-travEdges f g = getEdgeFocused <$> traverse f (EdgeFocused g)
-
+-- | Indexed vertex ttraversal.
 itravVerts :: Applicative f => (k -> v -> f v') -> Graph k e v -> f (Graph k e v')
 itravVerts = itraverse
 
+-- | Traverse the edges.
+travEdges :: Applicative f => (e -> f e') -> Graph k e v -> f (Graph k e' v)
+travEdges f g = getEdgeFocused <$> traverse f (EdgeFocused g)
+
+-- | Indexed edge traversal.
 itravEdges :: Applicative f => (k -> k -> e -> f e') -> Graph k e v -> f (Graph k e' v)
 itravEdges f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
 
--- | To simplify the implementation of traversals, we record the order in which
+-- | Traverse the keys.
+-- The size of the result may be smaller if f maps two or more distinct keys to
+-- the same new key. In this case the value at the greatest of the original keys
+-- is retained.
 --
-data Action k e v
-  = Vert k v
-  | Edge k k e
-  deriving (Show, Read, Eq, Ord, Data)
-makePrisms ''Action
+-- TODO It seems that the Monad constraint here is necessary due to the nested
+-- structure of the edge maps. Is there some way to remove this constraint?
+travKeys :: (Monad f, Ord k, Ord k') => (k -> f k') -> Graph k e v -> f (Graph k' e v)
+travKeys f g =
+  let vs' = fKeys f (g ^. vertMap)
+      es' = join $ traverse (fKeys f) <$> fKeys f (g ^. edgeMap)
+  in Graph <$> vs' <*> es'
+  where
+    fKeys :: (Applicative f, Ord k, Ord k') => (k -> f k') -> Map k a -> f (Map k' a)
+    fKeys f m = M.fromList <$> traverse (_1 f) (M.toList m)
 
 instance Bifunctor (Graph k) where
   bimap fe fv = mapVerts fv . mapEdges fe
 
 instance Bifoldable (Graph k) where
+  bifoldr fe fv acc g = execState (bitraverse_ (modify . fe) (modify . fv) g) acc
 
 instance Ord k => Bitraversable (Graph k) where
   bitraverse = dfs
@@ -358,12 +416,13 @@ dfs fe fv = idfs (\k1 k2 -> fe) (const fv)
 bfs fe fv = ibfs (\k1 k2 -> fe) (const fv)
 
 -- | Depth first and breadth first indexed bitraversals of the graph.
-idfs, ibfs :: (Applicative f, Ord k)
-           => (k -> k -> e -> f e')
-           -> (k -> v -> f v')
-           -> Graph k e v -> f (Graph k e' v')
+idfs, ibfs, ibitraverse :: (Applicative f, Ord k)
+                        => (k -> k -> e -> f e')
+                        -> (k -> v -> f v')
+                        -> Graph k e v -> f (Graph k e' v')
 idfs fe fv = travActs fe fv dfs'
 ibfs fe fv = travActs fe fv bfs'
+ibitraverse = idfs
 
 -- | Perform a depth first/breadth first bitraversal of the subgraph reachable
 -- from the key. Note that these are not law abiding traversals unless the
@@ -453,6 +512,45 @@ travActs fe fv trav g =
     construct acs =
       let (vs, es) = partition (has _Vert) acs
       in foldr act (foldr act empty vs) es
+
+-- | Decompose the graph into the context about the given key/vertex and
+-- the remainder of the graph not in the context.
+match :: Ord k => k -> v -> Graph k e v -> (Ctxt k e v, Graph k e v)
+match k v g = (Ctxt (labEdgesTo g k) v (labEdgesFrom g k), delKey k g)
+
+-- | Add the vertex and edges described by the context to the graph. Note that
+-- if the context describes edges to/from keys which are not in the graph already
+-- then those edges will not be added.
+addCtxt :: Ord k => k -> Ctxt k e v -> Graph k e v -> Graph k e v
+addCtxt k (Ctxt bef v aft) g =
+  foldr (uncurry (k `addEdge`))
+    (foldr (uncurry (`addEdge` k)) (addVert k v g) bef)
+    aft
+
+-- | A full decomposition of the graph into contexts.
+toDecomp :: Ord k => Graph k e v -> Map k (Ctxt k e v)
+toDecomp g = fst $ foldr (\(k, v) (cs, g') ->
+                                  let (c, g'') = match k v g'
+                                  in (M.insert k c cs, g''))
+                         (M.empty, g)
+                         (allLabVerts g)
+
+-- | Construct a graph from a decomposition.
+fromDecomp :: Ord k => Map k (Ctxt k e v) -> Graph k e v
+fromDecomp = foldr (uncurry addCtxt) empty . M.toList
+
+-- | The isomorphism between graphs and their decompositions.
+decomp :: (Ord k, Ord k')
+       => Iso (Graph k e v) (Graph k' e' v') (Map k (Ctxt k e v)) (Map k' (Ctxt k' e' v'))
+decomp = iso toDecomp fromDecomp
+
+instance (t ~ Graph k' v' e', Ord k) => Rewrapped (Graph k e v) t
+instance Ord k => Wrapped (Graph k e v) where
+  type Unwrapped (Graph k e v) = Map k (Ctxt k e v)
+  _Wrapped' = decomp
+
+instance Functor (Ctxt k e) where
+  fmap f = here %~ f
 
 test =
   let g1 = addVert 0 "hello" empty
