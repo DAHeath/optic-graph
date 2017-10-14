@@ -27,9 +27,9 @@ library.
 module Data.Ord.Graph
   ( Graph(..), vertMap, edgeMap
   , Ctxt(..), before, here, after
-  , vert, allVerts, allLabVerts
+  , vert, allVerts, allIdxVerts
   , edges, edgesTo, edgesFrom, allEdges
-  , labEdgesTo, labEdgesFrom, allLabEdges
+  , idxEdgesTo, idxEdgesFrom, allIdxEdges
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
@@ -109,8 +109,8 @@ allVerts :: Traversal' (Graph i e v) v
 allVerts = vertMap . traverse
 
 -- | Indexed traversal of all vertices.
-allLabVerts :: IndexedTraversal i (Graph i e v) (Graph i e v') v v'
-allLabVerts = vertMap . itraverse . indexed
+allIdxVerts :: IndexedTraversal i (Graph i e v) (Graph i e v') v v'
+allIdxVerts = vertMap . itraverse . indexed
 
 -- | A traversal which selects all edges between two indices.
 edges :: Ord i => i -> i -> Traversal' (Graph i e v) e
@@ -123,20 +123,20 @@ edgesFrom i = edgeMap . at i . _Just . traverse . traverse
 -- | A traversal which selects all edges that come from a different index.
 -- Note that edges from the index to itself are not included in this traversal.
 edgesTo :: Ord i => i -> Traversal' (Graph i e v) e
-edgesTo = labEdgesTo
+edgesTo = idxEdgesTo
 
 -- | Indexed traversal of the edges from the given index, labelled with the
 -- target index.
-labEdgesFrom :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
-labEdgesFrom i = edgeMap . at i . _Just . mapT . indexed
+idxEdgesFrom :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
+idxEdgesFrom i = edgeMap . at i . _Just . mapT . indexed
   where
     mapT f = itraverse (traverse . f)
 
 -- | Indexed traversal of the edges that come from a different index, labelled with
 -- the source index.
 -- Note that edges from the index to itself are not included in this traversal.
-labEdgesTo :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
-labEdgesTo i = reversed . edgeMap . at i . _Just . mapT i . indexed
+idxEdgesTo :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
+idxEdgesTo i = reversed . edgeMap . at i . _Just . mapT i . indexed
   where
     mapT i f = itraverse (\i' -> filtered (const (i /= i')) (traverse (f i')))
 
@@ -145,8 +145,8 @@ allEdges :: Traversal (Graph i e v) (Graph i e' v) e e'
 allEdges = edgeMap . traverse . traverse . traverse
 
 -- | Indexed traversal of all edges in the graph.
-allLabEdges :: IndexedTraversal (i, i) (Graph i e v) (Graph i e' v) e e'
-allLabEdges = edgeMap . map1 . indexed
+allIdxEdges :: IndexedTraversal (i, i) (Graph i e v) (Graph i e' v) e e'
+allIdxEdges = edgeMap . map1 . indexed
   where
     map1 f = itraverse (map2 f)
     map2 f i = itraverse (\i' -> traverse (f (i, i')))
@@ -248,26 +248,26 @@ delKey i g = g & vertMap %~ M.delete i
 -- If a vertex is removed, its index and all corresponding edges are also removed.
 filterVerts :: Ord i => (v -> Bool) -> Graph i e v -> Graph i e v
 filterVerts p g =
-  foldr (\(i, v) g' -> if not (p v) then delKey i g' else g') g (g ^@.. allLabVerts)
+  foldr (\(i, v) g' -> if not (p v) then delKey i g' else g') g (g ^@.. allIdxVerts)
 
 -- | Filter the vertices in the graph by the given predicate which also takes the
 -- vertex index as an argument.
 -- If a vertex is removed, its index and all corresponding edges are also removed.
 ifilterVerts :: Ord i => (i -> v -> Bool) -> Graph i e v -> Graph i e v
 ifilterVerts p g =
-  foldr (\(i, v) g' -> if not (p i v) then delKey i g' else g') g (g ^@.. allLabVerts)
+  foldr (\(i, v) g' -> if not (p i v) then delKey i g' else g') g (g ^@.. allIdxVerts)
 
 -- | Filter the edges in the graph by the given predicate.
 filterEdges :: Ord i => (e -> Bool) -> Graph i e v -> Graph i e v
 filterEdges p g =
-  foldr (\((i1, i2), _) -> delEdgeBy (not . p) i1 i2) g (g ^@.. allLabEdges)
+  foldr (\((i1, i2), _) -> delEdgeBy (not . p) i1 i2) g (g ^@.. allIdxEdges)
 
 -- | Filter the edges in the graph by the given predicate which also takes the
 -- edge indices as additional arguments.
 ifilterEdges :: Ord i => (i -> i -> e -> Bool) -> Graph i e v -> Graph i e v
 ifilterEdges p g =
   foldr (\((i1, i2), _) ->
-    idelEdgeBy (\i1 i2 e -> not $ p i1 i2 e) i1 i2) g (g ^@.. allLabEdges)
+    idelEdgeBy (\i1 i2 e -> not $ p i1 i2 e) i1 i2) g (g ^@.. allIdxEdges)
 
 -- | Filter the indices in the graph by the given predicate.
 filterIdxs :: Ord i => (i -> Bool) -> Graph i e v -> Graph i e v
@@ -283,7 +283,7 @@ clearEntry i m = maybe m (\m' -> if null m' then M.delete i m else m) (M.lookup 
 
 -- | Reverse the direction of all edges in the graph.
 reverse :: Ord i => Graph i e v -> Graph i e v
-reverse g = foldr (\((i1, i2), e) -> addEdge i2 i1 e) init (g ^@.. allLabEdges)
+reverse g = foldr (\((i1, i2), e) -> addEdge i2 i1 e) init (g ^@.. allIdxEdges)
   where
     init = Graph (g ^. vertMap) M.empty
 
@@ -497,7 +497,7 @@ dfsFrom' i g = do
       _1 %= (Vert i v:)
       mapM_ (\(i', e) -> do
         _1 %= (Edge i i' e:)
-        dfsFrom' i' g) (g ^@.. labEdgesFrom i)
+        dfsFrom' i' g) (g ^@.. idxEdgesFrom i)
 bfsFrom' start g = knock start >> enter start
   where
     knock i = do
@@ -512,7 +512,7 @@ bfsFrom' start g = knock start >> enter start
     enter i = do
       ks <- mapM (\(i', e) -> do
         _1 %= (Edge i i' e:)
-        knock i') (g ^@.. labEdgesFrom i)
+        knock i') (g ^@.. idxEdgesFrom i)
       mapM_ enter (concat ks)
 
 -- | Promote a partial traversal (which only reaches a portion of the graph) to
@@ -550,7 +550,7 @@ travActs fe fv trav g =
 -- | Decompose the graph into the context about the given index/vertex and
 -- the remainder of the graph not in the context.
 match :: Ord i => i -> v -> Graph i e v -> (Ctxt i e v, Graph i e v)
-match i v g = (Ctxt (g ^@.. labEdgesTo i) v (g ^@.. labEdgesFrom i), delKey i g)
+match i v g = (Ctxt (g ^@.. idxEdgesTo i) v (g ^@.. idxEdgesFrom i), delKey i g)
 
 -- | Add the vertex and edges described by the context to the graph. Note that
 -- if the context describes edges to/from indices which are not in the graph already
@@ -567,7 +567,7 @@ toDecomp g = fst $ foldr (\(i, v) (cs, g') ->
                                   let (c, g'') = match i v g'
                                   in (M.insert i c cs, g''))
                          (M.empty, g)
-                         (g ^@.. allLabVerts)
+                         (g ^@.. allIdxVerts)
 
 -- | Construct a graph from a decomposition.
 fromDecomp :: Ord i => Map i (Ctxt i e v) -> Graph i e v
