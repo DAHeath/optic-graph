@@ -34,7 +34,7 @@ prop_travPure :: Traversal IGraph IGraph Int Int -> IGraph -> Bool
 prop_travPure t g = t pure g == (pure g :: Identity IGraph)
 
 prop_addVertOrder :: Int -> Int -> IGraph -> Bool
-prop_addVertOrder k v g = (order g < order (addVert k v g)) || k `elem` keys g
+prop_addVertOrder k v g = (order g < order (addVert k v g)) || k `elem` idxs g
 
 prop_addVertGet :: Int -> Int -> IGraph -> Bool
 prop_addVertGet k v g = addVert k v g ^. at k == Just v
@@ -42,12 +42,12 @@ prop_addVertGet k v g = addVert k v g ^. at k == Just v
 prop_addEdgeSize :: Int -> Int -> Int -> IGraph -> Bool
 prop_addEdgeSize k1 k2 e g =
   (size g < size (addEdge k1 k2 e g))
-  || k1 `notElem` keys g
-  || k2 `notElem` keys g
+  || k1 `notElem` idxs g
+  || k2 `notElem` idxs g
 
 -- | TODO this property is only true if the graph is connected.
 prop_reachRebuild :: Int -> IGraph -> Bool
-prop_reachRebuild k g = reached k g `union` reaches k g == g || k `notElem` keys g
+prop_reachRebuild k g = reached k g `union` reaches k g == g || k `notElem` idxs g
 
 prop_decomp :: IGraph -> Bool
 prop_decomp g = fromDecomp (toDecomp g) == g
