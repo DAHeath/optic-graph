@@ -21,6 +21,8 @@ library
                      , mtl
                      , lens
                      , bifunctors
+                     , QuickCheck
+                     , hspec
   default-language:    Haskell2010
 
 executable ord-graph-exe

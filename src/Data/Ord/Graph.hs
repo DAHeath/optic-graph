@@ -35,19 +35,15 @@ module Data.Ord.Graph
   , travEdges, itravEdges
   , travKeys
   , reaches, reached
-  , dfs, bfs
+  , Bitraversal, dfs, bfs
   , idfs, ibfs, ibitraverse
   , idfsFrom, ibfsFrom
   , match, addCtxt
   , toDecomp, fromDecomp, decomp
-  )
-
-
-  where
+  ) where
 
 import           Control.Lens
 import           Control.Monad.State
--- import           Control.Monad
 
 import           Data.Bifunctor
 import           Data.Bifoldable
@@ -61,6 +57,10 @@ import qualified Data.Set as S
 import           Data.List (partition)
 
 import           Prelude as P hiding (reverse)
+
+import           Test.QuickCheck.Arbitrary
+import           Test.QuickCheck.Gen (Gen)
+import qualified Test.QuickCheck.Gen as G
 
 data Graph k e v = Graph
   { _vertMap :: Map k v
@@ -109,7 +109,7 @@ allEdges = edgeMap . traverse . traverse . traverse
 
 -- | The edges to the given key, labelled with their source key.
 labEdgesTo :: Ord k => Graph k e v -> k -> [(k, e)]
-labEdgesTo = labEdgesFrom . reverse
+labEdgesTo g k = filter (\(k', _) -> k' /= k) $ labEdgesFrom (reverse g) k
 
 -- | The edges from the given key, labelled with their target key.
 labEdgesFrom :: Ord k => Graph k e v -> k -> [(k, e)]
@@ -408,7 +408,7 @@ reached k = runIdentity . dfsFrom Identity Identity k
 
 -- | The subgraph that reaches the given key.
 reaches :: Ord k => k -> Graph k e v -> Graph k e v
-reaches k = reached k . reverse
+reaches k = delEdges k k . reverse . reached k . reverse
 
 -- | Depth first and breadth first bitraversals of the graph.
 dfs, bfs :: Ord k => Bitraversal (Graph k e v) (Graph k e' v') e e' v v'
@@ -493,7 +493,8 @@ promoteFrom fr g = do
   s <- use _2
   let s' = S.difference ks s
   if null s' then return ()
-  else fr (S.findMin s') g
+  else do fr (S.findMin s') g
+          promoteFrom fr g
 
 -- | Promote a stateful generator of graph actions to a indexed bitraversal.
 travActs :: (Ord k, Applicative f)
@@ -537,7 +538,7 @@ toDecomp g = fst $ foldr (\(k, v) (cs, g') ->
 
 -- | Construct a graph from a decomposition.
 fromDecomp :: Ord k => Map k (Ctxt k e v) -> Graph k e v
-fromDecomp = foldr (uncurry addCtxt) empty . M.toList
+fromDecomp = foldl (flip (uncurry addCtxt)) empty . M.toList
 
 -- | The isomorphism between graphs and their decompositions.
 decomp :: (Ord k, Ord k')
@@ -551,6 +552,21 @@ instance Ord k => Wrapped (Graph k e v) where
 
 instance Functor (Ctxt k e) where
   fmap f = here %~ f
+
+instance (Ord k, Arbitrary k, Arbitrary e, Arbitrary v) => Arbitrary (Graph k e v) where
+  arbitrary = do
+    ks <- arbitrary
+    vs <- arbVerts ks
+    es <- if null ks then return [] else G.listOf (arbEdge ks)
+    return (foldr (\(k1, k2, e) -> addEdge k1 k2 e) (foldr (uncurry addVert) empty vs) es)
+    where
+      arbVerts = traverse (\k -> (\v -> (k, v)) <$> arbitrary)
+      arbEdge ks = do
+        k1 <- G.elements ks
+        k2 <- G.elements ks
+        e <- arbitrary
+        return (k1, k2, e)
+  shrink = const []
 
 test =
   let g1 = addVert 0 "hello" empty
