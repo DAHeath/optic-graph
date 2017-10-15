@@ -108,7 +108,7 @@ vert :: Ord i => i -> Lens' (Graph i e v) (Maybe v)
 vert i = vertMap . at i
 
 -- | A traversal which selects all vertices in the graph.
-allVerts :: Traversal' (Graph i e v) v
+allVerts :: Traversal (Graph i e v) (Graph i e v') v v'
 allVerts = vertMap . traverse
 
 -- | Indexed traversal of all vertices.
