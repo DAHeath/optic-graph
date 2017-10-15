@@ -54,6 +54,7 @@ module Data.Ord.Graph
   , reaches, reached
   , Bitraversal, dfs, bfs, top
   , idfs, ibfs, itop, ibitraverse
+  , dfsFrom, bfsFrom
   , idfsFrom, ibfsFrom
   , match, addCtxt
   , toDecomp, fromDecomp, decomp
@@ -437,7 +438,7 @@ type Bitraversal s t a b c d =
 
 -- | The subgraph reached from the given index.
 reached :: Ord i => i -> Graph i e v -> Graph i e v
-reached i = runIdentity . dfsFrom Identity Identity i
+reached i = runIdentity . dfsFrom i Identity Identity
 
 -- | The subgraph that reaches the given index.
 reaches :: Ord i => i -> Graph i e v -> Graph i e v
@@ -481,21 +482,23 @@ itop fe fv g =
 -- from the index. Note that these are not law abiding traversals unless the
 -- choice of index has a source vertex.
 dfsFrom, bfsFrom :: (Applicative f, Ord i)
-                 => (e -> f e')
+                 => i
+                 -> (e -> f e')
                  -> (v -> f v')
-                 -> i -> Graph i e v -> f (Graph i e' v')
-dfsFrom fe fv = idfsFrom (\i1 i2 -> fe) (const fv)
-bfsFrom fe fv = ibfsFrom (\i1 i2 -> fe) (const fv)
+                 -> Graph i e v -> f (Graph i e' v')
+dfsFrom i fe fv = idfsFrom i (\i1 i2 -> fe) (const fv)
+bfsFrom i fe fv = ibfsFrom i (\i1 i2 -> fe) (const fv)
 
 -- | Perform a depth first/breadth first indexed bitraversal of the subgraph
 -- reachable from the index. Note that these are not law abiding traversals unless
 -- the choice of index has a source vertex.
 idfsFrom, ibfsFrom :: (Applicative f, Ord i)
-                   => (i -> i -> e -> f e')
+                   => i
+                   -> (i -> i -> e -> f e')
                    -> (i -> v -> f v')
-                   -> i -> Graph i e v -> f (Graph i e' v')
-idfsFrom fe fv i = travActs fe fv (dfsFrom' i)
-ibfsFrom fe fv i = travActs fe fv (bfsFrom' i)
+                   -> Graph i e v -> f (Graph i e' v')
+idfsFrom i fe fv = travActs fe fv (dfsFrom' i)
+ibfsFrom i fe fv = travActs fe fv (bfsFrom' i)
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the graph.
