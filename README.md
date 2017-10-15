@@ -5,11 +5,11 @@ Directed graphs with ordered indices, vertex labels, and edge labels.
 Here's a quick example in ghci:
 ```haskell
 > let g = fromLists [(0, "foo"), (1, "bar"), (2, "baz")] [(0, 1, True), (1, 1, True), (1, 0, False)]
-> g ^@.. idxEdgesFrom 1
+> g ^@.. iedgesFrom 1
   ==> [(0,False)],(1,True)]
 
 > let g' = mapEdges not g
-> g' ^@.. idxEdgesFrom 1
+> g' ^@.. iedgesFrom 1
   ==> [(0,True)],(1,False)]
 
 > let g'' = g' & allVerts . traverse %~ succ
