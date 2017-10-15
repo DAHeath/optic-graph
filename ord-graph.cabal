@@ -17,6 +17,7 @@ library
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl
+                     , monad-loops
                      , lens
                      , bifunctors
                      , QuickCheck

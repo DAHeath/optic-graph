@@ -52,8 +52,8 @@ module Data.Ord.Graph
   , travEdges, itravEdges
   , travIdxs
   , reaches, reached
-  , Bitraversal, dfs, bfs
-  , idfs, ibfs, ibitraverse
+  , Bitraversal, dfs, bfs, top
+  , idfs, ibfs, itop, ibitraverse
   , idfsFrom, ibfsFrom
   , match, addCtxt
   , toDecomp, fromDecomp, decomp
@@ -61,6 +61,8 @@ module Data.Ord.Graph
 
 import           Control.Lens
 import           Control.Monad.State
+import           Control.Monad.Except
+import           Control.Monad.Loops (whileM_)
 
 import           Data.Bifunctor
 import           Data.Bifoldable
@@ -121,7 +123,6 @@ edgesFrom :: Ord i => i -> Traversal' (Graph i e v) e
 edgesFrom i = edgeMap . at i . _Just . traverse . traverse
 
 -- | A traversal which selects all edges that come from a different index.
--- Note that edges from the index to itself are not included in this traversal.
 edgesTo :: Ord i => i -> Traversal' (Graph i e v) e
 edgesTo = iedgesTo
 
@@ -134,11 +135,10 @@ iedgesFrom i = edgeMap . at i . _Just . mapT . indexed
 
 -- | Indexed traversal of the edges that come from a different index, labelled with
 -- the source index.
--- Note that edges from the index to itself are not included in this traversal.
 iedgesTo :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
 iedgesTo i = reversed . edgeMap . at i . _Just . mapT i . indexed
   where
-    mapT i f = itraverse (\i' -> filtered (const (i /= i')) (traverse (f i')))
+    mapT i f = itraverse (traverse . f)
 
 -- | A traversal which selects all edges in the graph.
 allEdges :: Traversal (Graph i e v) (Graph i e' v) e e'
@@ -188,11 +188,11 @@ instance AsEmpty (Graph i e v) where
   _Empty = nearly empty (\g -> null (g ^. vertMap) && null (g ^. edgeMap))
 
 -- | The number of vertices in the graph.
-order :: Integral i => Graph i e v -> i
+order :: Integral n => Graph i e v -> n
 order g = toEnum $ length (g ^. vertMap)
 
 -- | The number of edges in the graph
-size :: Integral i => Graph i e v -> i
+size :: Integral n => Graph i e v -> n
 size g = toEnum $ length (g ^.. allEdges)
 
 -- | Add a vertex at the index, or replace the vertex at that index.
@@ -445,8 +445,16 @@ reaches i = delEdges i i . reverse . reached i . reverse
 
 -- | Depth first and breadth first bitraversals of the graph.
 dfs, bfs :: Ord i => Bitraversal (Graph i e v) (Graph i e' v') e e' v v'
-dfs fe fv = idfs (\i1 i2 -> fe) (const fv)
-bfs fe fv = ibfs (\i1 i2 -> fe) (const fv)
+dfs fe fv = idfs (\_ _ -> fe) (const fv)
+bfs fe fv = ibfs (\_ _ -> fe) (const fv)
+
+-- | Topological bitraversal of the graph. If the graph contains cycles,
+-- returns Nothing.
+top :: (Applicative f, Ord i, Eq e)
+     => (e -> f e')
+     -> (v -> f v')
+     -> Graph i e v -> Maybe (f (Graph i e' v'))
+top fe fv = itop (\_ _ -> fe) (const fv)
 
 -- | Depth first and breadth first indexed bitraversals of the graph.
 idfs, ibfs, ibitraverse :: (Applicative f, Ord i)
@@ -456,6 +464,18 @@ idfs, ibfs, ibitraverse :: (Applicative f, Ord i)
 idfs fe fv = travActs fe fv dfs'
 ibfs fe fv = travActs fe fv bfs'
 ibitraverse = idfs
+
+-- | Topological indexed bitraversal of the graph. If the graph contains cycles,
+-- returns Nothing.
+itop :: (Applicative f, Ord i, Eq e)
+     => (i -> i -> e -> f e')
+     -> (i -> v -> f v')
+     -> Graph i e v -> Maybe (f (Graph i e' v'))
+itop fe fv g =
+  let res = execStateT top' ([], S.empty, g)
+  in case res of
+    Left _ -> Nothing
+    Right st -> Just (actionsToGraph fe fv (st ^. _1))
 
 -- | Perform a depth first/breadth first bitraversal of the subgraph reachable
 -- from the index. Note that these are not law abiding traversals unless the
@@ -482,6 +502,30 @@ ibfsFrom fe fv i = travActs fe fv (bfsFrom' i)
 dfs', bfs' :: Ord i => Graph i e v -> State ([Action i e v], Set i) ()
 dfs' = promoteFrom dfsFrom'
 bfs' = promoteFrom bfsFrom'
+
+-- | Stateful computation which calculates the topological traversal of the graph.
+-- This is an implementation of Kahn's algorithm.
+top' :: (Eq e, Ord i) => StateT ([Action i e v], Set i, Graph i e v) (Either ()) ()
+top' = do
+  g <- use _3
+  _2 .= noIncoming g
+  whileM_ ((not . null) <$> use _2) $ do
+    i <- S.findMin <$> use _2
+    _2 %= S.delete i
+    g <- use _3
+    case g ^. at i of
+      Nothing -> throwError ()
+      Just v -> do
+        _1 %= (Vert i v:)
+        forM_ (g ^@.. iedgesFrom i) (\(i', e) -> do
+          _1 %= (Edge i i' e:)
+          g <- _3 <%= delEdge i i' e
+          when (null (g ^.. edgesTo i')) (_2 %= S.insert i'))
+  g <- use _3
+  when (size g > 0) $ throwError ()
+  where
+    hasIncoming g = S.fromList $ map (snd . fst) $ g ^@.. iallEdges
+    noIncoming g = idxSet g `S.difference` hasIncoming g
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the subgraph reached from a
@@ -536,8 +580,15 @@ travActs :: (Ord i, Applicative f)
          -> (Graph i e v -> State ([Action i e v], Set i) ())
          -> Graph i e v -> f (Graph i e' v')
 travActs fe fv trav g =
-  let acs = fst (execState (trav g) ([], S.empty)) ^. reversed
-  in construct <$> traverse flat acs
+  let acs = fst (execState (trav g) ([], S.empty))
+  in actionsToGraph fe fv acs
+
+-- | Convert a list of actions to a graph using the given applicative functions.
+actionsToGraph :: (Ord i, Applicative f)
+               => (i -> i -> e -> f e')
+               -> (i -> v -> f v')
+               -> [Action i e v] -> f (Graph i e' v')
+actionsToGraph fe fv acs = construct <$> traverse flat (acs ^. reversed)
   where
     flat (Vert i v) = Vert i <$> fv i v
     flat (Edge i i' e) = Edge i i' <$> fe i i' e
