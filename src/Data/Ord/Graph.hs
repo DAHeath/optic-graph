@@ -442,7 +442,7 @@ reached i = runIdentity . dfsFrom i Identity Identity
 
 -- | The subgraph that reaches the given index.
 reaches :: Ord i => i -> Graph i e v -> Graph i e v
-reaches i = delEdges i i . reverse . reached i . reverse
+reaches i = reverse . reached i . reverse
 
 -- | Depth first and breadth first bitraversals of the graph.
 dfs, bfs :: Ord i => Bitraversal (Graph i e v) (Graph i e' v') e e' v v'
@@ -483,9 +483,9 @@ itop fe fv g =
 -- choice of index has a source vertex.
 dfsFrom, bfsFrom :: (Applicative f, Ord i)
                  => i
-                 -> (e -> f e')
-                 -> (v -> f v')
-                 -> Graph i e v -> f (Graph i e' v')
+                 -> (e -> f e)
+                 -> (v -> f v)
+                 -> Graph i e v -> f (Graph i e v)
 dfsFrom i fe fv = idfsFrom i (\i1 i2 -> fe) (const fv)
 bfsFrom i fe fv = ibfsFrom i (\i1 i2 -> fe) (const fv)
 
@@ -493,12 +493,24 @@ bfsFrom i fe fv = ibfsFrom i (\i1 i2 -> fe) (const fv)
 -- reachable from the index. Note that these are not law abiding traversals unless
 -- the choice of index has a source vertex.
 idfsFrom, ibfsFrom :: (Applicative f, Ord i)
-                   => i
-                   -> (i -> i -> e -> f e')
-                   -> (i -> v -> f v')
-                   -> Graph i e v -> f (Graph i e' v')
-idfsFrom i fe fv = travActs fe fv (dfsFrom' i)
-ibfsFrom i fe fv = travActs fe fv (bfsFrom' i)
+           => i
+           -> (i -> i -> e -> f e)
+           -> (i -> v -> f v)
+           -> Graph i e v -> f (Graph i e v)
+idfsFrom i fe fv g =
+  let g' = travActs fe fv (dfsFrom' i) g
+  in delEdgeMerge <$> g' <*> pure g
+ibfsFrom i fe fv g =
+  let g' = travActs fe fv (bfsFrom' i) g
+  in delEdgeMerge <$> g' <*> pure g
+
+-- | Delete all edges in the second graph that occur between keys that have
+-- edges in the first graph before merging.
+delEdgeMerge :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
+delEdgeMerge g' g =
+  let es = map fst (g' ^@.. iallEdges)
+      g'' = foldr (uncurry delEdges) g es
+  in g' `union` g''
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the graph.
