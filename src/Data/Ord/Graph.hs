@@ -35,7 +35,7 @@ module Data.Ord.Graph
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
-  , connections, successors, predecessor
+  , connections, successors, predecessors
   , addVert, addEdge
   , delVert
   , delEdgeBy, delEdge
