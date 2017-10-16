@@ -35,11 +35,12 @@ module Data.Ord.Graph
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
+  , hasVert, hasEdge
   , connections, successors, predecessors, ancestors, descendants
   , addVert, addEdge
   , delVert
   , delEdgeBy, delEdge
-  , delKey
+  , delIdx
   , filterVerts, ifilterVerts
   , filterEdges, ifilterEdges
   , filterIdxs
@@ -198,6 +199,14 @@ order = toEnum . lengthOf allVerts
 size :: Integral n => Graph i e v -> n
 size = toEnum . lengthOf allEdges
 
+-- | Is there a vertex at the index?
+hasVert :: Ord i => Graph i e v -> i -> Bool
+hasVert g i = not $ null (g ^? vertMap .ix i)
+
+-- | Is there an edge between the given indices?
+hasEdge :: Ord i => Graph i e v -> i -> i -> Bool
+hasEdge g i1 i2 = not $ null (g ^? edgeMap . ix i1 . ix i2)
+
 -- | All connections in the graph with both indices, vertex labels, and the edge label.
 connections :: Ord i => Graph i e v -> [((i, v), e, (i, v))]
 connections g =
@@ -248,8 +257,8 @@ delEdgeBy i1 i2 p = edgeMap . at i1 . non' _Empty . at i2 %~ mfilter (not . p)
 
 -- | Remove a index from the graph, deleting the corresponding vertices and
 -- edges to and from the index.
-delKey :: Ord i => i -> Graph i e v -> Graph i e v
-delKey i g = g & vertMap %~ M.delete i
+delIdx :: Ord i => i -> Graph i e v -> Graph i e v
+delIdx i g = g & vertMap %~ M.delete i
                & edgeMap %~ M.delete i
                & edgeMap %~ M.mapMaybe ((non' _Empty %~ M.delete i) . Just)
 
@@ -277,7 +286,7 @@ ifilterEdges p g =
 
 -- | Filter the indices in the graph by the given predicate.
 filterIdxs :: Ord i => (i -> Bool) -> Graph i e v -> Graph i e v
-filterIdxs p g = foldr delKey g (filter (not . p) (idxs g))
+filterIdxs p g = foldr delIdx g (filter (not . p) (idxs g))
 
 -- | Reverse the direction of all edges in the graph.
 reverse :: Ord i => Graph i e v -> Graph i e v
@@ -409,17 +418,13 @@ itravEdges f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
---
--- TODO It seems that the Monad constraint here is necessary due to the nested
--- structure of the edge maps. Is there some way to remove this constraint?
-travIdxs :: (Monad f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
+travIdxs :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
 travIdxs f g =
-  let vs' = fIdxs f (g ^. vertMap)
-      es' = join $ traverse (fIdxs f) <$> fIdxs f (g ^. edgeMap)
-  in Graph <$> vs' <*> es'
+  replace (idxs g) <$> traverse f (idxs g)
   where
-    fIdxs :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Map i a -> f (Map i' a)
-    fIdxs f m = M.fromList <$> traverse (_1 f) (M.toList m)
+    replace is is' =
+      let m = M.fromList (zip is is')
+      in mapIdxs (\i -> m M.! i) g
 
 instance Bifunctor (Graph i) where
   bimap fe fv = mapVerts fv . mapEdges fe
@@ -668,7 +673,7 @@ actionsToGraph fe fv acs = construct <$> traverse flat acs
 -- the remainder of the graph not in the context.
 match :: Ord i => i -> v -> Graph i e v -> (Ctxt i e v, Graph i e v)
 match i v g = (Ctxt (filter ((/= i) . fst) $ g ^@.. iedgesTo i)
-                    v (g ^@.. iedgesFrom i), delKey i g)
+                    v (g ^@.. iedgesFrom i), delIdx i g)
 
 -- | Add the vertex and edges described by the context to the graph. Note that
 -- if the context describes edges to/from indices which are not in the graph already
