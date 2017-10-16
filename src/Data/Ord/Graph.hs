@@ -187,7 +187,7 @@ instance AsEmpty (Graph i e v) where
 
 -- | The number of vertices in the graph.
 order :: Integral n => Graph i e v -> n
-order = toEnum . lengthOf vertMap
+order = toEnum . lengthOf allVerts
 
 -- | The number of edges in the graph
 size :: Integral n => Graph i e v -> n
@@ -669,7 +669,8 @@ actionsToGraph fe fv acs = construct <$> traverse flat (acs ^. reversed)
 -- | Decompose the graph into the context about the given index/vertex and
 -- the remainder of the graph not in the context.
 match :: Ord i => i -> v -> Graph i e v -> (Ctxt i e v, Graph i e v)
-match i v g = (Ctxt (g ^@.. iedgesTo i) v (g ^@.. iedgesFrom i), delKey i g)
+match i v g = (Ctxt (filter ((/= i) . fst) $ g ^@.. iedgesTo i)
+                    v (g ^@.. iedgesFrom i), delKey i g)
 
 -- | Add the vertex and edges described by the context to the graph. Note that
 -- if the context describes edges to/from indices which are not in the graph already
