@@ -5,6 +5,8 @@
            , FlexibleInstances
            , UndecidableInstances
            , MultiParamTypeClasses
+           , PatternSynonyms
+           , ViewPatterns
            , RankNTypes
            , NoMonomorphismRestriction
            #-}
@@ -28,14 +30,15 @@ module Data.Ord.Graph
   ( Graph(..), vertMap, edgeMap
   , Ctxt(..), before, here, after
   , allVerts, iallVerts
-  , edges, edgesTo, edgesFrom, allEdges
+  , edgesTo, edgesFrom, allEdges
   , iedgesTo, iedgesFrom, iallEdges
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
+  , connections, successors, predecessors
   , addVert, addEdge
   , delVert
-  , delEdges, delEdgeBy, delEdge, idelEdgeBy
+  , delEdgeBy, delEdge
   , delKey
   , filterVerts, ifilterVerts
   , filterEdges, ifilterEdges
@@ -56,10 +59,12 @@ module Data.Ord.Graph
   , idfs, ibfs, itop, ibitraverse
   , dfsFrom, bfsFrom
   , idfsFrom, ibfsFrom
+  , path, ipath
   , match, addCtxt
   , toDecomp, fromDecomp, decomp
   ) where
 
+import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State
 import           Control.Monad.Except
@@ -74,8 +79,9 @@ import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
-import           Data.List (partition)
-import           Data.Maybe (catMaybes)
+import qualified Data.Sequence as Seq
+import           Data.List (partition, minimumBy)
+import           Data.Maybe (catMaybes, mapMaybe)
 
 import           Prelude as P hiding (reverse)
 
@@ -85,7 +91,7 @@ import qualified Test.QuickCheck.Gen as G
 
 data Graph i e v = Graph
   { _vertMap :: Map i v
-  , _edgeMap :: Map i (Map i [e])
+  , _edgeMap :: Map i (Map i e)
   } deriving (Show, Read, Eq, Ord, Data)
 makeLenses ''Graph
 
@@ -113,12 +119,12 @@ iallVerts :: IndexedTraversal i (Graph i e v) (Graph i e v') v v'
 iallVerts = vertMap . itraverse . indexed
 
 -- | A traversal which selects all edges between two indices.
-edges :: Ord i => i -> i -> Traversal' (Graph i e v) e
-edges i1 i2 = edgeMap . ix i1 . ix i2 . traverse
+edge :: Ord i => i -> i -> Traversal' (Graph i e v) e
+edge i1 i2 = edgeMap . ix i1 . ix i2
 
 -- | A traversal which selects all edges that originate at an index.
 edgesFrom :: Ord i => i -> Traversal' (Graph i e v) e
-edgesFrom i = edgeMap . ix i . traverse . traverse
+edgesFrom i = edgeMap . ix i . traverse
 
 -- | A traversal which selects all edges that come from a different index.
 edgesTo :: Ord i => i -> Traversal' (Graph i e v) e
@@ -127,27 +133,23 @@ edgesTo = iedgesTo
 -- | Indexed traversal of the edges from the given index, labelled with the
 -- target index.
 iedgesFrom :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
-iedgesFrom i = edgeMap . ix i . mapT . indexed
-  where
-    mapT f = itraverse (traverse . f)
+iedgesFrom i = edgeMap . ix i . itraverse . indexed
 
 -- | Indexed traversal of the edges that come from a different index, labelled with
 -- the source index.
 iedgesTo :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
-iedgesTo i = reversed . edgeMap . ix i . mapT . indexed
-  where
-    mapT f = itraverse (traverse . f)
+iedgesTo i = reversed . edgeMap . ix i . itraverse . indexed
 
 -- | A traversal which selects all edges in the graph.
 allEdges :: Traversal (Graph i e v) (Graph i e' v) e e'
-allEdges = edgeMap . traverse . traverse . traverse
+allEdges = edgeMap . traverse . traverse
 
 -- | Indexed traversal of all edges in the graph.
 iallEdges :: IndexedTraversal (i, i) (Graph i e v) (Graph i e' v) e e'
 iallEdges = edgeMap . map1 . indexed
   where
     map1 f = itraverse (map2 f)
-    map2 f i = itraverse (\i' -> traverse (f (i, i')))
+    map2 f i = itraverse (\i' -> f (i, i'))
 
 -- | Indices of the graph in ascending order.
 idxs :: Graph i e v -> [i]
@@ -165,17 +167,18 @@ empty = Graph M.empty M.empty
 fromLists :: Ord k => [(k, v)] -> [(k, k, e)] -> Graph k e v
 fromLists vs = foldr (\(i1, i2, e) -> addEdge i1 i2 e) (foldr (uncurry addVert) empty vs)
 
--- | Combine two graphs. If both graph have a vertex at the same index, use the
+-- | Combine two graphs. If both graph have a vertex/edge at the same index, use the
 -- vertex label from the first graph.
 union :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
-union = unionWith const
+union = unionWith const const
 
 -- | Combine two graphs. If both graphs have a vertex at the same index, use the
 -- provided function to decide how to generate the new vertex at the index.
-unionWith :: Ord i => (v -> v -> v) -> Graph i e v -> Graph i e v -> Graph i e v
-unionWith f (Graph v1 f1) (Graph v2 f2) =
-  Graph (M.unionWith f v1 v2)
-        (M.unionWith (M.unionWith (++)) f1 f2)
+unionWith :: Ord i => (v -> v -> v) -> (e -> e -> e)
+          -> Graph i e v -> Graph i e v -> Graph i e v
+unionWith fv fe (Graph v1 f1) (Graph v2 f2) =
+  Graph (M.unionWith fv v1 v2)
+        (M.unionWith (M.unionWith fe) f1 f2)
 
 instance Ord i => Monoid (Graph i e v) where
   mempty = empty
@@ -187,11 +190,28 @@ instance AsEmpty (Graph i e v) where
 
 -- | The number of vertices in the graph.
 order :: Integral n => Graph i e v -> n
-order = toEnum . lengthOf vertMap
+order = toEnum . lengthOf allVerts
 
 -- | The number of edges in the graph
 size :: Integral n => Graph i e v -> n
 size = toEnum . lengthOf allEdges
+
+-- | All connections in the graph with both indices, vertex labels, and the edge label.
+connections :: Ord i => Graph i e v -> [((i, v), e, (i, v))]
+connections g =
+  let es = g ^@.. iallEdges
+  in mapMaybe (\((i1, i2), e) -> do
+    v1 <- g ^? ix i1
+    v2 <- g ^? ix i2
+    return ((i1, v1), e, (i2, v2))) es
+
+-- | The successor indices for the given index.
+successors :: Ord i => Graph i e v -> i -> [i]
+successors g i = map fst (g ^@.. iedgesFrom i)
+
+-- | The predecessor indices for the given index.
+predecessors :: Ord i => Graph i e v -> i -> [i]
+predecessors g i = map fst (g ^@.. reversed . iedgesFrom i)
 
 -- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph i e v -> Graph i e v
@@ -202,7 +222,7 @@ addVert i v = at i ?~ v
 addEdge :: Ord i => i -> i -> e -> Graph i e v -> Graph i e v
 addEdge i1 i2 e g = g &
   if has (ix i1) g && has (ix i2) g
-  then edgeMap . at i1 . non' _Empty . at i2 . non' _Empty %~ (e:)
+  then edgeMap . at i1 . non' _Empty . at i2 ?~ e
   else id
 
 -- | Delete all vertices that are equal to the given value.
@@ -211,21 +231,16 @@ delVert :: (Eq v, Ord i) => v -> Graph i e v -> Graph i e v
 delVert v = filterVerts (not . (==) v)
 
 -- | Remove all edges occurring between two indices.
-delEdges :: Ord i => i -> i -> Graph i e v -> Graph i e v
-delEdges i1 i2 = edgeMap . at i1 . non' _Empty . at i2 .~ Nothing
+delEdge :: Ord i => i -> i -> Graph i e v -> Graph i e v
+delEdge i1 i2 = edgeMap . at i1 . non' _Empty . at i2 .~ Nothing
 
--- | Delete any edges between the two indices which satisfy the predicate.
-delEdgeBy :: Ord i => (e -> Bool) -> i -> i -> Graph i e v -> Graph i e v
-delEdgeBy p = idelEdgeBy (\i1 i2 -> p)
-
--- | Delete any edges between the two indices which satisfy the predicate which also
--- takes the edge indices as additional arguments.
-idelEdgeBy :: Ord i => (i -> i -> e -> Bool) -> i -> i -> Graph i e v -> Graph i e v
-idelEdgeBy p i1 i2 = edgeMap . at i1 . non' _Empty . at i2 . non' _Empty %~ filter (not . p i1 i2)
-
--- | Delete the edge between the two indices with the given value.
-delEdge :: (Eq e, Ord i) => i -> i -> e -> Graph i e v -> Graph i e v
-delEdge i1 i2 e = delEdgeBy (== e) i1 i2
+-- | Delete the edge between the two indices if it satisfies the predicate.
+delEdgeBy :: Ord i => i -> i -> (e -> Bool) -> Graph i e v -> Graph i e v
+delEdgeBy i1 i2 p = edgeMap . at i1 . non' _Empty . at i2 %~ f
+  where
+    f me = do
+      e <- me
+      if p e then Nothing else Just e
 
 -- | Remove a index from the graph, deleting the corresponding vertices and
 -- edges to and from the index.
@@ -248,14 +263,13 @@ ifilterVerts p = vertMap %~ M.filterWithKey p
 -- | Filter the edges in the graph by the given predicate.
 filterEdges :: Ord i => (e -> Bool) -> Graph i e v -> Graph i e v
 filterEdges p g =
-  foldr (\((i1, i2), _) -> delEdgeBy (not . p) i1 i2) g (g ^@.. iallEdges)
+  foldr (\((i1, i2), _) -> delEdgeBy i1 i2 (not . p)) g (g ^@.. iallEdges)
 
 -- | Filter the edges in the graph by the given predicate which also takes the
 -- edge indices as additional arguments.
 ifilterEdges :: Ord i => (i -> i -> e -> Bool) -> Graph i e v -> Graph i e v
 ifilterEdges p g =
-  foldr (\((i1, i2), _) ->
-    idelEdgeBy (\i1 i2 e -> not $ p i1 i2 e) i1 i2) g (g ^@.. iallEdges)
+  foldr (\((i1, i2), _) -> delEdgeBy i1 i2 (not . p i1 i2)) g (g ^@.. iallEdges)
 
 -- | Filter the indices in the graph by the given predicate.
 filterIdxs :: Ord i => (i -> Bool) -> Graph i e v -> Graph i e v
@@ -305,7 +319,7 @@ edgeFocused :: Iso (Graph i e v) (Graph i' e' v')
 edgeFocused = iso EdgeFocused getEdgeFocused
 
 instance Functor (EdgeFocused i v) where
-  fmap = over (from edgeFocused . edgeMap) . fmap . fmap . fmap
+  fmap = over (from edgeFocused . edgeMap) . fmap . fmap
 
 instance Foldable (EdgeFocused i v) where
   foldr = foldrOf (from edgeFocused . allEdges)
@@ -321,8 +335,8 @@ instance FoldableWithIndex (i, i) (EdgeFocused i v)
 instance TraversableWithIndex (i, i) (EdgeFocused i v) where
   itraverse = itraverseOf (from edgeFocused . edgeMap . itraverse . mapT)
     where
-      mapT :: Applicative f => Indexed (i, i) e (f e') -> i -> Map i [e] -> f (Map i [e'])
-      mapT ix i1 = M.traverseWithKey (\i2 -> traverse (runIndexed ix (i1, i2)))
+      mapT :: Applicative f => Indexed (i, i) e (f e') -> i -> Map i e -> f (Map i e')
+      mapT ix i1 = M.traverseWithKey (\i2 -> runIndexed ix (i1, i2))
 
 -- | Apply the given function to all vertices.
 mapVerts :: (v -> v') -> Graph i e v -> Graph i e v'
@@ -474,23 +488,15 @@ idfsFrom, ibfsFrom :: (Applicative f, Ord i)
            -> Graph i e v -> f (Graph i e v)
 idfsFrom i fe fv g =
   let g' = travActs fe fv (dfsFrom' i) g
-  in delEdgesMerge <$> g' <*> pure g
+  in delEdgeMerge <$> g' <*> pure g
 ibfsFrom i fe fv g =
   let g' = travActs fe fv (bfsFrom' i) g
-  in delEdgesMerge <$> g' <*> pure g
+  in delEdgeMerge <$> g' <*> pure g
 
--- | Delete all edges in the second graph that occur between keys that have
--- edges in the first graph before merging.
-delEdgesMerge :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
-delEdgesMerge g' g =
-  let es = map fst (g' ^@.. iallEdges)
-      g'' = foldr (uncurry delEdges) g es
-  in g' `union` g''
-
-delEdgeMerge :: (Eq e, Ord i) => Graph i e v -> Graph i e v -> Graph i e v
+delEdgeMerge :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
 delEdgeMerge g' g =
   let es = g' ^@.. iallEdges
-      g'' = foldr (\((i1, i2), e) -> delEdge i1 i2 e) g es
+      g'' = foldr (\((i1, i2), e) -> delEdge i1 i2) g es
   in g' `union` g''
 
 -- | Stateful computations which calculate the actions needed to perform a
@@ -501,7 +507,7 @@ bfs' = promoteFrom bfsFrom'
 
 -- | Stateful computation which calculates the topological traversal of the graph.
 -- This is an implementation of Kahn's algorithm.
-top' :: (Eq e, Ord i) => StateT ([Action i e v], Set i, Graph i e v) (Either ()) ()
+top' :: Ord i => StateT ([Action i e v], Set i, Graph i e v) (Either ()) ()
 top' = do
   set <~ uses graph noIncoming
   whileM_ (uses set $ not . null) $ do
@@ -513,7 +519,7 @@ top' = do
         acs %= (Vert i v:)
         forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
           acs %= (Edge i i' e:)
-          g <- graph <%= delEdge i i' e
+          g <- graph <%= delEdge i i'
           when (hasn't (edgesTo i') g) (set %= S.insert i')
   g <- use graph
   when (size g > 0) $ throwError ()
@@ -539,30 +545,26 @@ dfsFrom' i g = do
   where
     acs = _1
     set = _2
-bfsFrom' start g = knock start >> enter start
+bfsFrom' start g = evalStateT (visit start >> loop) Seq.empty
   where
-    knock i = do
-      b <- use $ set . contains i
-      if b then return Nothing
-      else case g ^. at i of
-        Nothing -> return Nothing
+    loop =
+      whileM_ (gets $ not . null) $ do
+        i <- state (\(Seq.viewl -> h Seq.:< t) -> (h, t))
+        forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
+          lift (acs %= (Edge i i' e:))
+          visit i'
+    visit i = do
+      b <- lift (use $ set . contains i)
+      unless b $ case g ^. at i of
+        Nothing -> return ()
         Just v -> do
-          set %= S.insert i
-          acs %= (Vert i v:)
-          return $ Just i
-    enter i = do
-      ks <- forM (g ^@.. iedgesFrom i) $ \(i', e) -> do
-        acs %= (Edge i i' e:)
-        knock i'
-      mapM_ enter (catMaybes ks)
+          lift (set %= S.insert i)
+          lift (acs %= (Vert i v:))
+          modify (Seq.|> i)
     acs = _1
     set = _2
 
 -- | Bitraversal of a path between the two given indices (if one exists).
---
--- Note that as a side-effect, this will delete any edges that appear along the
--- path if they are an exact duplicate of an edge in the traversal (the same indices
--- and equal under (==)).
 path :: (Applicative f, Ord i, Eq e) => i -> i
      -> (e -> f e)
      -> (v -> f v)
@@ -570,16 +572,12 @@ path :: (Applicative f, Ord i, Eq e) => i -> i
 path i1 i2 fe fv = ipath i1 i2 (\_ _ -> fe) (const fv)
 
 -- | Indexed bitraversal of a path between the two given indices (if one exists).
---
--- Note that as a side-effect, this will delete any edges that appear along the
--- path if they are an exact duplicate of an edge in the traversal (the same indices
--- and equal under (==)).
 ipath :: (Applicative f, Ord i, Eq e) => i -> i
      -> (i -> i -> e -> f e)
      -> (i -> v -> f v)
      -> Graph i e v -> Maybe (f (Graph i e v))
 ipath i1 i2 fe fv g = do
-  m <- bellmanFord' (const 1) i1 g
+  m <- dijkstra' (const 1) i1 g
   acs <- recAcs m i2
   let g' = actionsToGraph fe fv acs
   return (delEdgeMerge <$> g' <*> pure g)
@@ -597,8 +595,30 @@ ipath i1 i2 fe fv g = do
 -- the index to the information required to reconstruct the path the index's
 -- predecessor to the index (specifically the incoming edge and the index's
 -- vertex).
-bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
-             -> Maybe (Map i (i, e, v))
+dijkstra', bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
+                         -> Maybe (Map i (i, e, v))
+dijkstra' weight i g = either (const Nothing) (Just . view _1) $ execStateT (do
+  dists . at i ?= 0
+  whileM_ (uses iSet $ not . null) $ do
+    ds <- use dists
+    near <- minimumBy (\i1 i2 -> cmp (M.lookup i1 ds) (M.lookup i2 ds)) . S.toList <$> use iSet
+    iSet %= S.delete near
+    forM_ (g ^@.. iedgesFrom near) $ \(i', e) -> do
+      ds <- use dists
+      let alt = (+ weight e) <$> M.lookup near ds
+      when (cmp alt (M.lookup i' ds) ==  LT) $
+        case g ^. at i' of
+          Nothing -> throwError ()
+          Just v -> do
+            dists . at i' .= alt
+            actsTo . at i' ?= (near, e, v)
+  ) (M.empty, M.empty, idxSet g)
+  where
+    actsTo = _1
+    dists = _2
+    iSet = _3
+    cmp md1 md2 = maybe GT (\d1 -> maybe LT (compare d1) md2) md1
+
 bellmanFord' weight i g = either (const Nothing) (Just . fst) $ execStateT (do
   dists . at i .= Just 0
   forM_ (g ^.. allVerts) $ \_ ->
@@ -669,7 +689,8 @@ actionsToGraph fe fv acs = construct <$> traverse flat (acs ^. reversed)
 -- | Decompose the graph into the context about the given index/vertex and
 -- the remainder of the graph not in the context.
 match :: Ord i => i -> v -> Graph i e v -> (Ctxt i e v, Graph i e v)
-match i v g = (Ctxt (g ^@.. iedgesTo i) v (g ^@.. iedgesFrom i), delKey i g)
+match i v g = (Ctxt (filter ((/= i) . fst) $ g ^@.. iedgesTo i)
+                    v (g ^@.. iedgesFrom i), delKey i g)
 
 -- | Add the vertex and edges described by the context to the graph. Note that
 -- if the context describes edges to/from indices which are not in the graph already
@@ -724,10 +745,18 @@ t = fromLists [ ('a', 10)
               , ('b', 17)
               , ('c', 8)
               , ('d', 3)
-              , ('e', 27)]
+              , ('e', 27)
+              , ('f', 4)
+              , ('g', 9)
+              , ('i', 13)
+              ]
               [ ('a', 'b', "this")
               , ('a', 'c', "is")
               , ('b', 'd', "so")
+              , ('d', 'f', "neat")
+              , ('d', 'g', "cool")
+              , ('f', 'g', "swell")
               -- , ('b', 'e', "fun")
+              , ('c', 'i', "whoa")
               ]
 
