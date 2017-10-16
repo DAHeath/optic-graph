@@ -499,17 +499,23 @@ idfsFrom, ibfsFrom :: (Applicative f, Ord i)
            -> Graph i e v -> f (Graph i e v)
 idfsFrom i fe fv g =
   let g' = travActs fe fv (dfsFrom' i) g
-  in delEdgeMerge <$> g' <*> pure g
+  in delEdgesMerge <$> g' <*> pure g
 ibfsFrom i fe fv g =
   let g' = travActs fe fv (bfsFrom' i) g
-  in delEdgeMerge <$> g' <*> pure g
+  in delEdgesMerge <$> g' <*> pure g
 
 -- | Delete all edges in the second graph that occur between keys that have
 -- edges in the first graph before merging.
-delEdgeMerge :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
-delEdgeMerge g' g =
+delEdgesMerge :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
+delEdgesMerge g' g =
   let es = map fst (g' ^@.. iallEdges)
       g'' = foldr (uncurry delEdges) g es
+  in g' `union` g''
+
+delEdgeMerge :: (Eq e, Ord i) => Graph i e v -> Graph i e v -> Graph i e v
+delEdgeMerge g' g =
+  let es = g' ^@.. iallEdges
+      g'' = foldr (\((i1, i2), e) -> delEdge i1 i2 e) g es
   in g' `union` g''
 
 -- | Stateful computations which calculate the actions needed to perform a
@@ -522,57 +528,134 @@ bfs' = promoteFrom bfsFrom'
 -- This is an implementation of Kahn's algorithm.
 top' :: (Eq e, Ord i) => StateT ([Action i e v], Set i, Graph i e v) (Either ()) ()
 top' = do
-  g <- use _3
-  _2 .= noIncoming g
-  whileM_ ((not . null) <$> use _2) $ do
-    i <- S.findMin <$> use _2
-    _2 %= S.delete i
-    g <- use _3
+  g <- use graph
+  set .= noIncoming g
+  whileM_ ((not . null) <$> use set) $ do
+    i <- S.findMin <$> use set
+    set %= S.delete i
+    g <- use graph
     case g ^. at i of
       Nothing -> throwError ()
       Just v -> do
-        _1 %= (Vert i v:)
+        acs %= (Vert i v:)
         forM_ (g ^@.. iedgesFrom i) (\(i', e) -> do
-          _1 %= (Edge i i' e:)
-          g <- _3 <%= delEdge i i' e
-          when (null (g ^.. edgesTo i')) (_2 %= S.insert i'))
-  g <- use _3
+          acs %= (Edge i i' e:)
+          g <- graph <%= delEdge i i' e
+          when (null (g ^.. edgesTo i')) (set %= S.insert i'))
+  g <- use graph
   when (size g > 0) $ throwError ()
   where
     hasIncoming g = S.fromList $ map (snd . fst) $ g ^@.. iallEdges
     noIncoming g = idxSet g `S.difference` hasIncoming g
+    acs = _1
+    set = _2
+    graph = _3
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the subgraph reached from a
 -- particular index.
 dfsFrom', bfsFrom' :: Ord i => i -> Graph i e v -> State ([Action i e v], Set i) ()
 dfsFrom' i g = do
-  s <- use _2
+  s <- use set
   if i `elem` s then return ()
   else case g ^. at i of
     Nothing -> return ()
     Just v -> do
-      _2 %= S.insert i
-      _1 %= (Vert i v:)
+      set %= S.insert i
+      acs %= (Vert i v:)
       mapM_ (\(i', e) -> do
-        _1 %= (Edge i i' e:)
+        acs %= (Edge i i' e:)
         dfsFrom' i' g) (g ^@.. iedgesFrom i)
+  where
+    acs = _1
+    set = _2
 bfsFrom' start g = knock start >> enter start
   where
     knock i = do
-      s <- use _2
+      s <- use set
       if i `elem` s then return []
       else case g ^. at i of
         Nothing -> return []
         Just v -> do
-          _2 %= S.insert i
-          _1 %= (Vert i v:)
+          set %= S.insert i
+          acs %= (Vert i v:)
           return [i]
     enter i = do
       ks <- mapM (\(i', e) -> do
-        _1 %= (Edge i i' e:)
+        acs %= (Edge i i' e:)
         knock i') (g ^@.. iedgesFrom i)
       mapM_ enter (concat ks)
+    acs = _1
+    set = _2
+
+-- | Bitraversal of a path between the two given indices (if one exists).
+--
+-- Note that as a side-effect, this will delete any edges that appear along the
+-- path if they are an exact duplicate of an edge in the traversal (the same indices
+-- and equal under (==)).
+path :: (Applicative f, Ord i, Eq e) => i -> i
+     -> (e -> f e)
+     -> (v -> f v)
+     -> Graph i e v -> Maybe (f (Graph i e v))
+path i1 i2 fe fv = ipath i1 i2 (\_ _ -> fe) (const fv)
+
+-- | Indexed bitraversal of a path between the two given indices (if one exists).
+--
+-- Note that as a side-effect, this will delete any edges that appear along the
+-- path if they are an exact duplicate of an edge in the traversal (the same indices
+-- and equal under (==)).
+ipath :: (Applicative f, Ord i, Eq e) => i -> i
+     -> (i -> i -> e -> f e)
+     -> (i -> v -> f v)
+     -> Graph i e v -> Maybe (f (Graph i e v))
+ipath i1 i2 fe fv g = do
+  m <- bellmanFord' (const 1) i1 g
+  acs <- recAcs m i2
+  let g' = actionsToGraph fe fv acs
+  return (delEdgeMerge <$> g' <*> pure g)
+  where
+    recAcs m i =
+      if i == i1 then (\v -> [Vert i v]) <$> g ^. at i
+      else
+        case M.lookup i m of
+          Nothing -> Nothing
+          Just (i', e, v) -> do
+            acs <- recAcs m i'
+            return (Vert i v : Edge i' i e : acs)
+
+-- | Bellman Ford shortest path from the given index. The result is a map of
+-- the index to the information required to reconstruct the path the index's
+-- predecessor to the index (specifically the incoming edge and the index's
+-- vertex).
+bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
+             -> Maybe (Map i (i, e, v))
+bellmanFord' weight i g = either (const Nothing) (Just . fst) $ execStateT (do
+  dists . at i .= Just 0
+  forM_ (g ^.. allVerts) $ \_ ->
+    iterEdgeWeights (\i1 i2 e d ->
+      case g ^. at i2 of
+        Nothing -> throwError ()
+        Just v -> do
+          dists . at i2 .= Just d
+          actsTo . at i2 .= Just (i1, e, v))
+  iterEdgeWeights (\_ _ _ _ -> throwError ())) (M.empty, M.empty)
+  where
+    -- call the action when a lower weight path is found
+    iterEdgeWeights ac =
+      forM_ (g ^@.. iallEdges) $ \((i1, i2), e) -> do
+        let w = weight e
+        md1 <- use (dists . at i1)
+        md2 <- use (dists . at i2)
+        forM_ (cmp md1 w md2) (ac i1 i2 e)
+
+    -- d1 + w < d2? Nothing represents infinite weight.
+    cmp md1 w md2 = do
+      d1 <- md1
+      case md2 of
+        Nothing -> Just (d1 + w)
+        Just d2 -> if d1 + w < d2 then Just (d1 + w) else Nothing
+    actsTo = _1
+    dists = _2
 
 -- | Promote a partial traversal (which only reaches a portion of the graph) to
 -- a full traversal by repeatedly invoking the partial traversal on non-visited
@@ -666,3 +749,15 @@ instance (Ord i, Arbitrary i, Arbitrary e, Arbitrary v) => Arbitrary (Graph i e 
         e <- arbitrary
         return (i1, i2, e)
   shrink = const []
+
+t = fromLists [ ('a', 10)
+              , ('b', 17)
+              , ('c', 8)
+              , ('d', 3)
+              , ('e', 27)]
+              [ ('a', 'b', "this")
+              , ('a', 'c', "is")
+              , ('b', 'd', "so")
+              -- , ('b', 'e', "fun")
+              ]
+
