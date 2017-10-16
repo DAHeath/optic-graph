@@ -61,6 +61,7 @@ module Data.Ord.Graph
   , toDecomp, fromDecomp, decomp
   ) where
 
+import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State
 import           Control.Monad.Except
@@ -540,22 +541,22 @@ dfsFrom' i g = do
   where
     acs = _1
     set = _2
-bfsFrom' start g = evalStateT (knock start >> loop) (S.singleton start)
+bfsFrom' start g = evalStateT (visit start >> loop) []
   where
     loop =
       whileM_ (gets $ not . null) $ do
-        i <- state S.deleteFindMin
+        i <- state (head &&& tail)
         forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
           lift (acs %= (Edge i i' e:))
-          knock i'
-    knock i = do
+          visit i'
+    visit i = do
       b <- lift (use $ set . contains i)
       unless b $ case g ^. at i of
         Nothing -> return ()
         Just v -> do
           lift (set %= S.insert i)
           lift (acs %= (Vert i v:))
-          modify (S.insert i)
+          modify (++ [i])
     acs = _1
     set = _2
 
@@ -751,6 +752,7 @@ t = fromLists [ ('a', 10)
               , ('e', 27)
               , ('f', 4)
               , ('g', 9)
+              , ('i', 13)
               ]
               [ ('a', 'b', "this")
               , ('a', 'c', "is")
@@ -759,5 +761,6 @@ t = fromLists [ ('a', 10)
               , ('d', 'g', "cool")
               , ('f', 'g', "swell")
               -- , ('b', 'e', "fun")
+              , ('c', 'i', "whoa")
               ]
 
