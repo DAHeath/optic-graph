@@ -44,6 +44,7 @@ prop_addEdgeSize k1 k2 e g =
   (size g < size (addEdge k1 k2 e g))
   || k1 `notElem` idxs g
   || k2 `notElem` idxs g
+  || hasEdge g k1 k2
 
 -- | TODO this property is only true if the graph is connected.
 prop_reachRebuild :: Int -> IGraph -> Bool
