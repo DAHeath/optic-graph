@@ -27,7 +27,7 @@ library.
 module Data.Ord.Graph
   ( Graph(..), vertMap, edgeMap
   , Ctxt(..), before, here, after
-  , vert, allVerts, iallVerts
+  , allVerts, iallVerts
   , edges, edgesTo, edgesFrom, allEdges
   , iedgesTo, iedgesFrom, iallEdges
   , idxs, idxSet
@@ -75,6 +75,7 @@ import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.List (partition)
+import           Data.Maybe (catMaybes)
 
 import           Prelude as P hiding (reverse)
 
@@ -103,10 +104,6 @@ data Action i e v
   deriving (Show, Read, Eq, Ord, Data)
 makePrisms ''Action
 
--- | A lens which selects the vertex at the index (if it exists).
-vert :: Ord i => i -> Lens' (Graph i e v) (Maybe v)
-vert i = vertMap . at i
-
 -- | A traversal which selects all vertices in the graph.
 allVerts :: Traversal (Graph i e v) (Graph i e v') v v'
 allVerts = vertMap . traverse
@@ -117,11 +114,11 @@ iallVerts = vertMap . itraverse . indexed
 
 -- | A traversal which selects all edges between two indices.
 edges :: Ord i => i -> i -> Traversal' (Graph i e v) e
-edges i1 i2 = edgeMap . at i1 . _Just . at i2 . _Just . traverse
+edges i1 i2 = edgeMap . ix i1 . ix i2 . traverse
 
 -- | A traversal which selects all edges that originate at an index.
 edgesFrom :: Ord i => i -> Traversal' (Graph i e v) e
-edgesFrom i = edgeMap . at i . _Just . traverse . traverse
+edgesFrom i = edgeMap . ix i . traverse . traverse
 
 -- | A traversal which selects all edges that come from a different index.
 edgesTo :: Ord i => i -> Traversal' (Graph i e v) e
@@ -130,16 +127,16 @@ edgesTo = iedgesTo
 -- | Indexed traversal of the edges from the given index, labelled with the
 -- target index.
 iedgesFrom :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
-iedgesFrom i = edgeMap . at i . _Just . mapT . indexed
+iedgesFrom i = edgeMap . ix i . mapT . indexed
   where
     mapT f = itraverse (traverse . f)
 
 -- | Indexed traversal of the edges that come from a different index, labelled with
 -- the source index.
 iedgesTo :: Ord i => i -> IndexedTraversal' i (Graph i e v) e
-iedgesTo i = reversed . edgeMap . at i . _Just . mapT i . indexed
+iedgesTo i = reversed . edgeMap . ix i . mapT . indexed
   where
-    mapT i f = itraverse (traverse . f)
+    mapT f = itraverse (traverse . f)
 
 -- | A traversal which selects all edges in the graph.
 allEdges :: Traversal (Graph i e v) (Graph i e' v) e e'
@@ -154,11 +151,11 @@ iallEdges = edgeMap . map1 . indexed
 
 -- | Indices of the graph in ascending order.
 idxs :: Graph i e v -> [i]
-idxs = M.keys . view vertMap
+idxs = views vertMap M.keys
 
 -- | The set of all indices in the graph.
 idxSet :: Graph i e v -> Set i
-idxSet = M.keysSet . view vertMap
+idxSet = views vertMap M.keysSet
 
 -- | A graph with no vertices and no edges.
 empty :: Graph i e v
@@ -190,27 +187,23 @@ instance AsEmpty (Graph i e v) where
 
 -- | The number of vertices in the graph.
 order :: Integral n => Graph i e v -> n
-order g = toEnum $ length (g ^. vertMap)
+order = toEnum . lengthOf vertMap
 
 -- | The number of edges in the graph
 size :: Integral n => Graph i e v -> n
-size g = toEnum $ length (g ^.. allEdges)
+size = toEnum . lengthOf allEdges
 
 -- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph i e v -> Graph i e v
-addVert i v g = g & vert i .~ Just v
+addVert i v = at i ?~ v
 
 -- | Add an edge between two indices in the graph if both indices have vertices. If
 -- they do not, the graph is unchanged.
 addEdge :: Ord i => i -> i -> e -> Graph i e v -> Graph i e v
-addEdge i1 i2 e g =
-  if has _Just (g ^. vert i1) && has _Just (g ^. vert i2)
-  then g & edgeMap . at i1 %~ newIfNeeded
-         & edgeMap . at i1 . _Just . at i2 %~ newIfNeeded
-         & edgeMap . at i1 . _Just . at i2 . _Just %~ (e:)
-  else g
-    where
-      newIfNeeded m = if has _Nothing m then Just mempty else m
+addEdge i1 i2 e g = g &
+  if has (ix i1) g && has (ix i2) g
+  then edgeMap . at i1 . non' _Empty . at i2 . non' _Empty %~ (e:)
+  else id
 
 -- | Delete all vertices that are equal to the given value.
 -- If a vertex is removed, its index and all corresponding edges are also removed.
@@ -219,8 +212,7 @@ delVert v = filterVerts (not . (==) v)
 
 -- | Remove all edges occurring between two indices.
 delEdges :: Ord i => i -> i -> Graph i e v -> Graph i e v
-delEdges i1 i2 g = g & edgeMap . at i1 . _Just %~ M.delete i2
-                     & edgeMap %~ clearEntry i1
+delEdges i1 i2 = edgeMap . at i1 . non' _Empty . at i2 .~ Nothing
 
 -- | Delete any edges between the two indices which satisfy the predicate.
 delEdgeBy :: Ord i => (e -> Bool) -> i -> i -> Graph i e v -> Graph i e v
@@ -229,9 +221,7 @@ delEdgeBy p = idelEdgeBy (\i1 i2 -> p)
 -- | Delete any edges between the two indices which satisfy the predicate which also
 -- takes the edge indices as additional arguments.
 idelEdgeBy :: Ord i => (i -> i -> e -> Bool) -> i -> i -> Graph i e v -> Graph i e v
-idelEdgeBy p i1 i2 g = g & edgeMap . at i1 . _Just . at i2 . _Just %~ filter (not . p i1 i2)
-                        & edgeMap . at i1 . _Just %~ clearEntry i2
-                        & edgeMap %~ clearEntry i1
+idelEdgeBy p i1 i2 = edgeMap . at i1 . non' _Empty . at i2 . non' _Empty %~ filter (not . p i1 i2)
 
 -- | Delete the edge between the two indices with the given value.
 delEdge :: (Eq e, Ord i) => i -> i -> e -> Graph i e v -> Graph i e v
@@ -242,21 +232,18 @@ delEdge i1 i2 e = delEdgeBy (== e) i1 i2
 delKey :: Ord i => i -> Graph i e v -> Graph i e v
 delKey i g = g & vertMap %~ M.delete i
                & edgeMap %~ M.delete i
-               & edgeMap . traverse %~ M.delete i
-               & edgeMap %~ cleanup
+               & edgeMap %~ M.mapMaybe ((non' _Empty %~ M.delete i) . Just)
 
 -- | Filter the vertices in the graph by the given predicate.
 -- If a vertex is removed, its index and all corresponding edges are also removed.
 filterVerts :: Ord i => (v -> Bool) -> Graph i e v -> Graph i e v
-filterVerts p g =
-  foldr (\(i, v) g' -> if not (p v) then delKey i g' else g') g (g ^@.. iallVerts)
+filterVerts p = vertMap %~ M.filter p
 
 -- | Filter the vertices in the graph by the given predicate which also takes the
 -- vertex index as an argument.
 -- If a vertex is removed, its index and all corresponding edges are also removed.
 ifilterVerts :: Ord i => (i -> v -> Bool) -> Graph i e v -> Graph i e v
-ifilterVerts p g =
-  foldr (\(i, v) g' -> if not (p i v) then delKey i g' else g') g (g ^@.. iallVerts)
+ifilterVerts p = vertMap %~ M.filterWithKey p
 
 -- | Filter the edges in the graph by the given predicate.
 filterEdges :: Ord i => (e -> Bool) -> Graph i e v -> Graph i e v
@@ -274,14 +261,6 @@ ifilterEdges p g =
 filterIdxs :: Ord i => (i -> Bool) -> Graph i e v -> Graph i e v
 filterIdxs p g = foldr delKey g (filter (not . p) (idxs g))
 
--- | Remove all empty entries in a map.
-cleanup :: (Ord i, Foldable t) => Map i (t a) -> Map i (t a)
-cleanup m = foldr clearEntry m (M.keys m)
-
--- | If the entry at the index in the map is empty, remove that index from the map.
-clearEntry :: (Foldable t, Ord i) => i -> Map i (t a) -> Map i (t a)
-clearEntry i m = maybe m (\m' -> if null m' then M.delete i m else m) (M.lookup i m)
-
 -- | Reverse the direction of all edges in the graph.
 reverse :: Ord i => Graph i e v -> Graph i e v
 reverse g = foldr (\((i1, i2), e) -> addEdge i2 i1 e) init (g ^@.. iallEdges)
@@ -292,10 +271,10 @@ instance Ord i => Reversing (Graph i e v) where
   reversing = reverse
 
 instance Functor (Graph i e) where
-  fmap f = vertMap %~ fmap f
+  fmap = over vertMap . fmap
 
 instance Foldable (Graph i e) where
-  foldr f acc g = foldr f acc (g ^. vertMap)
+  foldr = foldrOf (vertMap . traverse)
 
 instance Traversable (Graph i e) where
   traverse = traverseOf (vertMap . traverse)
@@ -312,7 +291,7 @@ type instance Index (Graph i e v) = i
 type instance IxValue (Graph i e v) = v
 instance Ord i => Ixed (Graph i e v)
 instance Ord i => At (Graph i e v) where
-  at = vert
+  at i = vertMap . at i
 
 -- | By default, graphs are "focused" on the vertices, meaning that common
 -- typeclass instances act on the vertices. EdgeFocused provides an alternative
@@ -326,13 +305,13 @@ edgeFocused :: Iso (Graph i e v) (Graph i' e' v')
 edgeFocused = iso EdgeFocused getEdgeFocused
 
 instance Functor (EdgeFocused i v) where
-  fmap f = from edgeFocused . edgeMap %~ fmap (fmap (fmap f))
+  fmap = over (from edgeFocused . edgeMap) . fmap . fmap . fmap
 
 instance Foldable (EdgeFocused i v) where
-  foldr f acc g = foldr f acc (g ^.. from edgeFocused . allEdges)
+  foldr = foldrOf (from edgeFocused . allEdges)
 
 instance Traversable (EdgeFocused i v) where
-  traverse = traverseOf (from edgeFocused . edgeMap . traverse . traverse . traverse)
+  traverse = traverseOf (from edgeFocused . allEdges)
 
 instance (i ~ i', v ~ v') => Each (EdgeFocused i v e) (EdgeFocused i' v' e') e e' where
   each = traversed
@@ -396,13 +375,13 @@ foldIdxs f acc g = foldr f acc (idxs g)
 travVerts :: Applicative f => (v -> f v') -> Graph i e v -> f (Graph i e v')
 travVerts = traverse
 
--- | Indexed vertex ttraversal.
+-- | Indexed vertex traversal.
 itravVerts :: Applicative f => (i -> v -> f v') -> Graph i e v -> f (Graph i e v')
 itravVerts = itraverse
 
 -- | Traverse the edges.
 travEdges :: Applicative f => (e -> f e') -> Graph i e v -> f (Graph i e' v)
-travEdges f g = getEdgeFocused <$> traverse f (EdgeFocused g)
+travEdges = allEdges
 
 -- | Indexed edge traversal.
 itravEdges :: Applicative f => (i -> i -> e -> f e') -> Graph i e v -> f (Graph i e' v)
@@ -472,11 +451,7 @@ itop :: (Applicative f, Ord i, Eq e)
      => (i -> i -> e -> f e')
      -> (i -> v -> f v')
      -> Graph i e v -> Maybe (f (Graph i e' v'))
-itop fe fv g =
-  let res = execStateT top' ([], S.empty, g)
-  in case res of
-    Left _ -> Nothing
-    Right st -> Just (actionsToGraph fe fv (st ^. _1))
+itop fe fv g = actionsToGraph fe fv <$> execStateT top' ([], S.empty, g) ^? _Right . _1
 
 -- | Perform a depth first/breadth first bitraversal of the subgraph reachable
 -- from the index. Note that these are not law abiding traversals unless the
@@ -528,20 +503,18 @@ bfs' = promoteFrom bfsFrom'
 -- This is an implementation of Kahn's algorithm.
 top' :: (Eq e, Ord i) => StateT ([Action i e v], Set i, Graph i e v) (Either ()) ()
 top' = do
-  g <- use graph
-  set .= noIncoming g
-  whileM_ ((not . null) <$> use set) $ do
-    i <- S.findMin <$> use set
-    set %= S.delete i
+  set <~ uses graph noIncoming
+  whileM_ (uses set $ not . null) $ do
+    i <- zoom set $ state S.deleteFindMin
     g <- use graph
     case g ^. at i of
       Nothing -> throwError ()
       Just v -> do
         acs %= (Vert i v:)
-        forM_ (g ^@.. iedgesFrom i) (\(i', e) -> do
+        forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
           acs %= (Edge i i' e:)
           g <- graph <%= delEdge i i' e
-          when (null (g ^.. edgesTo i')) (set %= S.insert i'))
+          when (hasn't (edgesTo i') g) (set %= S.insert i')
   g <- use graph
   when (size g > 0) $ throwError ()
   where
@@ -556,35 +529,32 @@ top' = do
 -- particular index.
 dfsFrom', bfsFrom' :: Ord i => i -> Graph i e v -> State ([Action i e v], Set i) ()
 dfsFrom' i g = do
-  s <- use set
-  if i `elem` s then return ()
-  else case g ^. at i of
-    Nothing -> return ()
-    Just v -> do
-      set %= S.insert i
+  b <- set . contains i <<.= True
+  unless b $
+    forOf_ (ix i) g $ \v -> do
       acs %= (Vert i v:)
-      mapM_ (\(i', e) -> do
+      forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
         acs %= (Edge i i' e:)
-        dfsFrom' i' g) (g ^@.. iedgesFrom i)
+        dfsFrom' i' g
   where
     acs = _1
     set = _2
 bfsFrom' start g = knock start >> enter start
   where
     knock i = do
-      s <- use set
-      if i `elem` s then return []
+      b <- use $ set . contains i
+      if b then return Nothing
       else case g ^. at i of
-        Nothing -> return []
+        Nothing -> return Nothing
         Just v -> do
           set %= S.insert i
           acs %= (Vert i v:)
-          return [i]
+          return $ Just i
     enter i = do
-      ks <- mapM (\(i', e) -> do
+      ks <- forM (g ^@.. iedgesFrom i) $ \(i', e) -> do
         acs %= (Edge i i' e:)
-        knock i') (g ^@.. iedgesFrom i)
-      mapM_ enter (concat ks)
+        knock i'
+      mapM_ enter (catMaybes ks)
     acs = _1
     set = _2
 
@@ -632,12 +602,12 @@ bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
 bellmanFord' weight i g = either (const Nothing) (Just . fst) $ execStateT (do
   dists . at i .= Just 0
   forM_ (g ^.. allVerts) $ \_ ->
-    iterEdgeWeights (\i1 i2 e d ->
+    iterEdgeWeights $ \i1 i2 e d ->
       case g ^. at i2 of
         Nothing -> throwError ()
         Just v -> do
-          dists . at i2 .= Just d
-          actsTo . at i2 .= Just (i1, e, v))
+          dists . at i2 ?= d
+          actsTo . at i2 ?= (i1, e, v)
   iterEdgeWeights (\_ _ _ _ -> throwError ())) (M.empty, M.empty)
   where
     -- call the action when a lower weight path is found
@@ -667,9 +637,9 @@ promoteFrom fr g = do
   let ks = idxSet g
   s <- use _2
   let s' = S.difference ks s
-  if null s' then return ()
-  else do fr (S.findMin s') g
-          promoteFrom fr g
+  unless (null s') $ do
+    fr (S.findMin s') g
+    promoteFrom fr g
 
 -- | Promote a stateful generator of graph actions to a indexed bitraversal.
 travActs :: (Ord i, Applicative f)
