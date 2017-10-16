@@ -35,7 +35,7 @@ module Data.Ord.Graph
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
-  , connections, successors, predecessors
+  , connections, successors, predecessors, ancestors, descendants
   , addVert, addEdge
   , delVert
   , delEdgeBy, delEdge
@@ -212,6 +212,12 @@ successors i = toListOf $ iedgesFrom i . asIndex
 -- | The predecessor indices for the given index.
 predecessors :: Ord i => i -> Graph i e v -> [i]
 predecessors i = toListOf $ reversed . iedgesFrom i . asIndex
+
+descendants :: Ord i => Graph i e v -> i -> [i]
+descendants g i = filter (/= i) $ idxs (reached i g)
+
+ancestors :: Ord i => Graph i e v -> i -> [i]
+ancestors g i = filter (/= i) $ idxs (reaches i g)
 
 -- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph i e v -> Graph i e v
@@ -427,7 +433,7 @@ type Bitraversal s t a b c d =
 
 -- | The subgraph reached from the given index.
 reached :: Ord i => i -> Graph i e v -> Graph i e v
-reached i = runIdentity . dfsFrom i Identity Identity
+reached i = runIdentity . travActs (\_ _ e -> Identity e) (\_ v -> Identity v) (dfsFrom' i)
 
 -- | The subgraph that reaches the given index.
 reaches :: Ord i => i -> Graph i e v -> Graph i e v
