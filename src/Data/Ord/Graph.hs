@@ -35,11 +35,12 @@ module Data.Ord.Graph
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
+  , hasVert, hasEdge
   , connections, successors, predecessors, ancestors, descendants
   , addVert, addEdge
   , delVert
   , delEdgeBy, delEdge
-  , delKey
+  , delIdx
   , filterVerts, ifilterVerts
   , filterEdges, ifilterEdges
   , filterIdxs
@@ -196,6 +197,14 @@ order = toEnum . lengthOf allVerts
 size :: Integral n => Graph i e v -> n
 size = toEnum . lengthOf allEdges
 
+-- | Is there a vertex at the index?
+hasVert :: Ord i => Graph i e v -> i -> Bool
+hasVert g i = not $ null (g ^? vertMap .ix i)
+
+-- | Is there an edge between the given indices?
+hasEdge :: Ord i => Graph i e v -> i -> i -> Bool
+hasEdge g i1 i2 = not $ null (g ^? edgeMap . ix i1 . ix i2)
+
 -- | All connections in the graph with both indices, vertex labels, and the edge label.
 connections :: Ord i => Graph i e v -> [((i, v), e, (i, v))]
 connections g =
@@ -206,12 +215,12 @@ connections g =
     return ((i1, v1), e, (i2, v2))) es
 
 -- | The successor indices for the given index.
-successors :: Ord i => Graph i e v -> i -> [i]
-successors g i = map fst (g ^@.. iedgesFrom i)
+successors :: Ord i => i -> Graph i e v -> [i]
+successors i = toListOf $ iedgesFrom i . asIndex
 
 -- | The predecessor indices for the given index.
-predecessors :: Ord i => Graph i e v -> i -> [i]
-predecessors g i = map fst (g ^@.. reversed . iedgesFrom i)
+predecessors :: Ord i => i -> Graph i e v -> [i]
+predecessors i = toListOf $ reversed . iedgesFrom i . asIndex
 
 descendants :: Ord i => Graph i e v -> i -> [i]
 descendants g i = filter (/= i) $ idxs (reached i g)
@@ -242,16 +251,12 @@ delEdge i1 i2 = edgeMap . at i1 . non' _Empty . at i2 .~ Nothing
 
 -- | Delete the edge between the two indices if it satisfies the predicate.
 delEdgeBy :: Ord i => i -> i -> (e -> Bool) -> Graph i e v -> Graph i e v
-delEdgeBy i1 i2 p = edgeMap . at i1 . non' _Empty . at i2 %~ f
-  where
-    f me = do
-      e <- me
-      if p e then Nothing else Just e
+delEdgeBy i1 i2 p = edgeMap . at i1 . non' _Empty . at i2 %~ mfilter (not . p)
 
 -- | Remove a index from the graph, deleting the corresponding vertices and
 -- edges to and from the index.
-delKey :: Ord i => i -> Graph i e v -> Graph i e v
-delKey i g = g & vertMap %~ M.delete i
+delIdx :: Ord i => i -> Graph i e v -> Graph i e v
+delIdx i g = g & vertMap %~ M.delete i
                & edgeMap %~ M.delete i
                & edgeMap %~ M.mapMaybe ((non' _Empty %~ M.delete i) . Just)
 
@@ -279,7 +284,7 @@ ifilterEdges p g =
 
 -- | Filter the indices in the graph by the given predicate.
 filterIdxs :: Ord i => (i -> Bool) -> Graph i e v -> Graph i e v
-filterIdxs p g = foldr delKey g (filter (not . p) (idxs g))
+filterIdxs p g = foldr delIdx g (filter (not . p) (idxs g))
 
 -- | Reverse the direction of all edges in the graph.
 reverse :: Ord i => Graph i e v -> Graph i e v
@@ -561,12 +566,10 @@ bfsFrom' start g = evalStateT (visit start >> loop) Seq.empty
           visit i'
     visit i = do
       b <- lift (use $ set . contains i)
-      unless b $ case g ^. at i of
-        Nothing -> return ()
-        Just v -> do
-          lift (set %= S.insert i)
-          lift (acs %= (Vert i v:))
-          modify (Seq.|> i)
+      unless b $ forOf_ (ix i) g $ \v -> do
+        lift (set %= S.insert i)
+        lift (acs %= (Vert i v:))
+        modify (Seq.|> i)
     acs = _1
     set = _2
 
@@ -590,12 +593,10 @@ ipath i1 i2 fe fv g = do
   where
     recAcs m i =
       if i == i1 then (\v -> [Vert i v]) <$> g ^. at i
-      else
-        case M.lookup i m of
-          Nothing -> Nothing
-          Just (i', e, v) -> do
-            acs <- recAcs m i'
-            return (Vert i v : Edge i' i e : acs)
+      else do
+        (i', e, v) <- M.lookup i m
+        acs <- recAcs m i'
+        return (Vert i v : Edge i' i e : acs)
 
 -- | Bellman Ford shortest path from the given index. The result is a map of
 -- the index to the information required to reconstruct the path the index's
@@ -603,7 +604,7 @@ ipath i1 i2 fe fv g = do
 -- vertex).
 dijkstra', bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
                          -> Maybe (Map i (i, e, v))
-dijkstra' weight i g = either (const Nothing) (Just . view _1) $ execStateT (do
+dijkstra' weight i g = fmap (view _1) $ (`execStateT` (M.empty, M.empty, idxSet g)) $ do
   dists . at i ?= 0
   whileM_ (uses iSet $ not . null) $ do
     ds <- use dists
@@ -612,33 +613,28 @@ dijkstra' weight i g = either (const Nothing) (Just . view _1) $ execStateT (do
     forM_ (g ^@.. iedgesFrom near) $ \(i', e) -> do
       ds <- use dists
       let alt = (+ weight e) <$> M.lookup near ds
-      when (cmp alt (M.lookup i' ds) ==  LT) $
-        case g ^. at i' of
-          Nothing -> throwError ()
-          Just v -> do
-            dists . at i' .= alt
-            actsTo . at i' ?= (near, e, v)
-  ) (M.empty, M.empty, idxSet g)
+      when (cmp alt (M.lookup i' ds) == LT) $ do
+        v <- lift $ g ^. at i'
+        dists . at i' .= alt
+        actsTo . at i' ?= (near, e, v)
   where
     actsTo = _1
     dists = _2
     iSet = _3
     cmp md1 md2 = maybe GT (\d1 -> maybe LT (compare d1) md2) md1
 
-bellmanFord' weight i g = either (const Nothing) (Just . fst) $ execStateT (do
-  dists . at i .= Just 0
-  forM_ (g ^.. allVerts) $ \_ ->
-    iterEdgeWeights $ \i1 i2 e d ->
-      case g ^. at i2 of
-        Nothing -> throwError ()
-        Just v -> do
-          dists . at i2 ?= d
-          actsTo . at i2 ?= (i1, e, v)
-  iterEdgeWeights (\_ _ _ _ -> throwError ())) (M.empty, M.empty)
+bellmanFord' weight i g = fmap fst $ (`execStateT` (M.empty, M.empty)) $ do
+  dists . at i ?= 0
+  forOf_ allVerts g $ \_ ->
+    iterEdgeWeights $ \i1 i2 e d -> do
+      v <- lift $ g ^. at i2
+      dists . at i2 ?= d
+      actsTo . at i2 ?= (i1, e, v)
+  iterEdgeWeights (\_ _ _ _ -> mzero)
   where
     -- call the action when a lower weight path is found
     iterEdgeWeights ac =
-      forM_ (g ^@.. iallEdges) $ \((i1, i2), e) -> do
+      iforOf_ iallEdges g $ \(i1, i2) e -> do
         let w = weight e
         md1 <- use (dists . at i1)
         md2 <- use (dists . at i2)
@@ -696,7 +692,7 @@ actionsToGraph fe fv acs = construct <$> traverse flat (acs ^. reversed)
 -- the remainder of the graph not in the context.
 match :: Ord i => i -> v -> Graph i e v -> (Ctxt i e v, Graph i e v)
 match i v g = (Ctxt (filter ((/= i) . fst) $ g ^@.. iedgesTo i)
-                    v (g ^@.. iedgesFrom i), delKey i g)
+                    v (g ^@.. iedgesFrom i), delIdx i g)
 
 -- | Add the vertex and edges described by the context to the graph. Note that
 -- if the context describes edges to/from indices which are not in the graph already
