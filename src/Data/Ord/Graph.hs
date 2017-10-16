@@ -416,17 +416,13 @@ itravEdges f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
---
--- TODO It seems that the Monad constraint here is necessary due to the nested
--- structure of the edge maps. Is there some way to remove this constraint?
-travIdxs :: (Monad f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
+travIdxs :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
 travIdxs f g =
-  let vs' = fIdxs f (g ^. vertMap)
-      es' = join $ traverse (fIdxs f) <$> fIdxs f (g ^. edgeMap)
-  in Graph <$> vs' <*> es'
+  replace (idxs g) <$> traverse f (idxs g)
   where
-    fIdxs :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Map i a -> f (Map i' a)
-    fIdxs f m = M.fromList <$> traverse (_1 f) (M.toList m)
+    replace is is' =
+      let m = M.fromList (zip is is')
+      in mapIdxs (\i -> m M.! i) g
 
 instance Bifunctor (Graph i) where
   bimap fe fv = mapVerts fv . mapEdges fe
