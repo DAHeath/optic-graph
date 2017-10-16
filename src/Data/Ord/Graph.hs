@@ -205,6 +205,14 @@ connections g =
     v2 <- g ^? ix i2
     return ((i1, v1), e, (i2, v2))) es
 
+-- | The successor indices for the given index.
+successors :: Ord i => Graph i e v -> i -> [i]
+successors g i = map fst (g ^@.. iedgesFrom i)
+
+-- | The predecessor indices for the given index.
+predecessors :: Ord i => Graph i e v -> i -> [i]
+predecessors g i = map fst (g ^@.. reversed . iedgesFrom i)
+
 -- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph i e v -> Graph i e v
 addVert i v = at i ?~ v
