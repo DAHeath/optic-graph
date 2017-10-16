@@ -539,22 +539,22 @@ dfsFrom' i g = do
   where
     acs = _1
     set = _2
-bfsFrom' start g = knock start >> enter start
+bfsFrom' start g = evalStateT (knock start >> loop) (S.singleton start)
   where
+    loop =
+      whileM_ (gets $ not . null) $ do
+        i <- state S.deleteFindMin
+        forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
+          lift (acs %= (Edge i i' e:))
+          knock i'
     knock i = do
-      b <- use $ set . contains i
-      if b then return Nothing
-      else case g ^. at i of
-        Nothing -> return Nothing
+      b <- lift (use $ set . contains i)
+      unless b $ case g ^. at i of
+        Nothing -> return ()
         Just v -> do
-          set %= S.insert i
-          acs %= (Vert i v:)
-          return $ Just i
-    enter i = do
-      ks <- forM (g ^@.. iedgesFrom i) $ \(i', e) -> do
-        acs %= (Edge i i' e:)
-        knock i'
-      mapM_ enter (catMaybes ks)
+          lift (set %= S.insert i)
+          lift (acs %= (Vert i v:))
+          modify (S.insert i)
     acs = _1
     set = _2
 
@@ -725,10 +725,16 @@ t = fromLists [ ('a', 10)
               , ('b', 17)
               , ('c', 8)
               , ('d', 3)
-              , ('e', 27)]
+              , ('e', 27)
+              , ('f', 4)
+              , ('g', 9)
+              ]
               [ ('a', 'b', "this")
               , ('a', 'c', "is")
               , ('b', 'd', "so")
+              , ('d', 'f', "neat")
+              , ('d', 'g', "cool")
+              , ('f', 'g', "swell")
               -- , ('b', 'e', "fun")
               ]
 
