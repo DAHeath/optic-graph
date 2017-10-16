@@ -56,6 +56,7 @@ module Data.Ord.Graph
   , idfs, ibfs, itop, ibitraverse
   , dfsFrom, bfsFrom
   , idfsFrom, ibfsFrom
+  , path, ipath
   , match, addCtxt
   , toDecomp, fromDecomp, decomp
   ) where
@@ -74,7 +75,7 @@ import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
-import           Data.List (partition)
+import           Data.List (partition, minimumBy)
 import           Data.Maybe (catMaybes)
 
 import           Prelude as P hiding (reverse)
@@ -579,7 +580,7 @@ ipath :: (Applicative f, Ord i, Eq e) => i -> i
      -> (i -> v -> f v)
      -> Graph i e v -> Maybe (f (Graph i e v))
 ipath i1 i2 fe fv g = do
-  m <- bellmanFord' (const 1) i1 g
+  m <- dijkstra' (const 1) i1 g
   acs <- recAcs m i2
   let g' = actionsToGraph fe fv acs
   return (delEdgeMerge <$> g' <*> pure g)
@@ -597,8 +598,30 @@ ipath i1 i2 fe fv g = do
 -- the index to the information required to reconstruct the path the index's
 -- predecessor to the index (specifically the incoming edge and the index's
 -- vertex).
-bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
-             -> Maybe (Map i (i, e, v))
+dijkstra', bellmanFord' :: (Ord i, Ord n, Num n) => (e -> n) -> i -> Graph i e v
+                         -> Maybe (Map i (i, e, v))
+dijkstra' weight i g = either (const Nothing) (Just . view _1) $ execStateT (do
+  dists . at i ?= 0
+  whileM_ (uses iSet $ not . null) $ do
+    ds <- use dists
+    near <- minimumBy (\i1 i2 -> cmp (M.lookup i1 ds) (M.lookup i2 ds)) . S.toList <$> use iSet
+    iSet %= S.delete near
+    forM_ (g ^@.. iedgesFrom near) $ \(i', e) -> do
+      ds <- use dists
+      let alt = (+ weight e) <$> M.lookup near ds
+      when (cmp alt (M.lookup i' ds) ==  LT) $
+        case g ^. at i' of
+          Nothing -> throwError ()
+          Just v -> do
+            dists . at i' .= alt
+            actsTo . at i' ?= (near, e, v)
+  ) (M.empty, M.empty, idxSet g)
+  where
+    actsTo = _1
+    dists = _2
+    iSet = _3
+    cmp md1 md2 = maybe GT (\d1 -> maybe LT (compare d1) md2) md1
+
 bellmanFord' weight i g = either (const Nothing) (Just . fst) $ execStateT (do
   dists . at i .= Just 0
   forM_ (g ^.. allVerts) $ \_ ->
