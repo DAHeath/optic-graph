@@ -5,6 +5,8 @@
            , FlexibleInstances
            , UndecidableInstances
            , MultiParamTypeClasses
+           , PatternSynonyms
+           , ViewPatterns
            , RankNTypes
            , NoMonomorphismRestriction
            #-}
@@ -76,6 +78,7 @@ import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Set (Set)
 import qualified Data.Set as S
+import qualified Data.Sequence as Seq
 import           Data.List (partition, minimumBy)
 import           Data.Maybe (catMaybes)
 
@@ -541,11 +544,11 @@ dfsFrom' i g = do
   where
     acs = _1
     set = _2
-bfsFrom' start g = evalStateT (visit start >> loop) []
+bfsFrom' start g = evalStateT (visit start >> loop) Seq.empty
   where
     loop =
       whileM_ (gets $ not . null) $ do
-        i <- state (head &&& tail)
+        i <- state (\(Seq.viewl -> h Seq.:< t) -> (h, t))
         forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
           lift (acs %= (Edge i i' e:))
           visit i'
@@ -556,7 +559,7 @@ bfsFrom' start g = evalStateT (visit start >> loop) []
         Just v -> do
           lift (set %= S.insert i)
           lift (acs %= (Vert i v:))
-          modify (++ [i])
+          modify (Seq.|> i)
     acs = _1
     set = _2
 
