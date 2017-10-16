@@ -35,6 +35,7 @@ module Data.Ord.Graph
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
+  , connections
   , addVert, addEdge
   , delVert
   , delEdgeBy, delEdge
@@ -80,7 +81,7 @@ import           Data.Set (Set)
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.List (partition, minimumBy)
-import           Data.Maybe (catMaybes)
+import           Data.Maybe (catMaybes, mapMaybe)
 
 import           Prelude as P hiding (reverse)
 
@@ -194,6 +195,15 @@ order = toEnum . lengthOf allVerts
 -- | The number of edges in the graph
 size :: Integral n => Graph i e v -> n
 size = toEnum . lengthOf allEdges
+
+-- | All connections in the graph with both indices, vertex labels, and the edge label.
+connections :: Ord i => Graph i e v -> [((i, v), e, (i, v))]
+connections g =
+  let es = g ^@.. iallEdges
+  in mapMaybe (\((i1, i2), e) -> do
+    v1 <- g ^? ix i1
+    v2 <- g ^? ix i2
+    return ((i1, v1), e, (i2, v2))) es
 
 -- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph i e v -> Graph i e v
