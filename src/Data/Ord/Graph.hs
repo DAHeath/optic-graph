@@ -263,13 +263,15 @@ delIdx i g = g & vertMap %~ M.delete i
 -- | Filter the vertices in the graph by the given predicate.
 -- If a vertex is removed, its index and all corresponding edges are also removed.
 filterVerts :: Ord i => (v -> Bool) -> Graph i e v -> Graph i e v
-filterVerts p = vertMap %~ M.filter p
+filterVerts p = ifilterVerts (const p)
 
 -- | Filter the vertices in the graph by the given predicate which also takes the
 -- vertex index as an argument.
 -- If a vertex is removed, its index and all corresponding edges are also removed.
 ifilterVerts :: Ord i => (i -> v -> Bool) -> Graph i e v -> Graph i e v
-ifilterVerts p = vertMap %~ M.filterWithKey p
+ifilterVerts p g =
+  let filtered = g & vertMap %~ M.filterWithKey p
+  in foldr delIdx filtered (idxSet g `S.difference` idxSet filtered)
 
 -- | Filter the edges in the graph by the given predicate.
 filterEdges :: Ord i => (e -> Bool) -> Graph i e v -> Graph i e v

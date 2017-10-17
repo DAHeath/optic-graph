@@ -22,6 +22,7 @@ main = hspec $
     it "decomposition should preserve structure" (property prop_decomp)
     it "delEdge should invert addEdge" (property prop_addDelEdge)
     it "delIdx should invert addVert" (property prop_addDelVert)
+    it "filterVerts should remove edges" (property prop_filterVertsEdges)
 
 type IGraph = Graph Int Int Int
 
@@ -58,3 +59,8 @@ prop_addDelEdge k1 k2 e g =
 prop_addDelVert :: Int -> Int -> IGraph -> Bool
 prop_addDelVert k v g =
   delIdx k (addVert k v g) == g || elemVert k g
+
+prop_filterVertsEdges :: Int -> Int -> Int -> Int -> Int -> IGraph -> Bool
+prop_filterVertsEdges i1 i2 v v' e g =
+  let added = addEdge i1 i2 e $ addVert i1 v $ addVert i2 v' g
+  in size added > size (filterVerts (/= v) added)
