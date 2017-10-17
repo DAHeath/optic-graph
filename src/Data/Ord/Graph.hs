@@ -541,7 +541,7 @@ top' = do
 dfsFrom', bfsFrom' :: Ord i => i -> Graph i e v -> State (Set i) [Action i e v]
 dfsFrom' i g = do
   b <- contains i <<.= True
-  fmap fold $ forM (guard b >> g ^? ix i) $ \v ->
+  fmap fold $ forM (guard (not b) >> g ^? ix i) $ \v ->
     fmap ((Vert i v:) . concat) $ forM (g ^@.. iedgesFrom i) $ \(i', e) ->
       (Edge i i' e:) <$> dfsFrom' i' g
 bfsFrom' start g = evalStateT ((++) <$> visit start <*> loop) Seq.empty
@@ -553,7 +553,7 @@ bfsFrom' start g = evalStateT ((++) <$> visit start <*> loop) Seq.empty
           (Edge i i' e:) <$> visit i'
     visit i = do
       b <- lift (use $ contains i)
-      fmap maybeToList $ forM (guard b >> g ^? ix i) $ \v -> do
+      fmap maybeToList $ forM (guard (not b) >> g ^? ix i) $ \v -> do
         lift (contains i .= True)
         modify (Seq.|> i)
         return $ Vert i v
