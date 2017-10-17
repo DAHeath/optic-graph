@@ -35,7 +35,7 @@ module Data.Ord.Graph
   , idxs, idxSet
   , empty, fromLists, union, unionWith
   , order, size
-  , hasVert, hasEdge
+  , elemVert, elemEdge
   , connections, successors, predecessors, ancestors, descendants
   , addVert, addEdge
   , delVert
@@ -198,12 +198,12 @@ size :: Integral n => Graph i e v -> n
 size = toEnum . lengthOf allEdges
 
 -- | Is there a vertex at the index?
-hasVert :: Ord i => Graph i e v -> i -> Bool
-hasVert g i = not $ null (g ^? vertMap .ix i)
+elemVert :: Ord i => i -> Graph i e v -> Bool
+elemVert i g = not $ null (g ^? vertMap .ix i)
 
 -- | Is there an edge between the given indices?
-hasEdge :: Ord i => Graph i e v -> i -> i -> Bool
-hasEdge g i1 i2 = not $ null (g ^? edgeMap . ix i1 . ix i2)
+elemEdge :: Ord i => i -> i -> Graph i e v -> Bool
+elemEdge i1 i2 g = not $ null (g ^? edgeMap . ix i1 . ix i2)
 
 -- | All connections in the graph with both indices, vertex labels, and the edge label.
 connections :: Ord i => Graph i e v -> [((i, v), e, (i, v))]

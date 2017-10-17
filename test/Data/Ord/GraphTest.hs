@@ -20,6 +20,8 @@ main = hspec $
     it "addVert should change lookup" (property prop_addVertGet)
     it "addEdge should increase size" (property prop_addEdgeSize)
     it "decomposition should preserve structure" (property prop_decomp)
+    it "delEdge should invert addEdge" (property prop_addDelEdge)
+    it "delIdx should invert addVert" (property prop_addDelVert)
 
 type IGraph = Graph Int Int Int
 
@@ -44,11 +46,15 @@ prop_addEdgeSize k1 k2 e g =
   (size g < size (addEdge k1 k2 e g))
   || k1 `notElem` idxs g
   || k2 `notElem` idxs g
-  || hasEdge g k1 k2
-
--- | TODO this property is only true if the graph is connected.
-prop_reachRebuild :: Int -> IGraph -> Bool
-prop_reachRebuild k g = reached k g `union` reaches k g == g || k `notElem` idxs g
+  || elemEdge k1 k2 g
 
 prop_decomp :: IGraph -> Bool
 prop_decomp g = fromDecomp (toDecomp g) == g
+
+prop_addDelEdge :: Int -> Int -> Int -> IGraph -> Bool
+prop_addDelEdge k1 k2 e g =
+  delEdge k1 k2 (addEdge k1 k2 e g) == g || elemEdge k1 k2 g
+
+prop_addDelVert :: Int -> Int -> IGraph -> Bool
+prop_addDelVert k v g =
+  delIdx k (addVert k v g) == g || elemVert k g
