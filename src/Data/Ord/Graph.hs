@@ -69,7 +69,7 @@ import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State
 import           Control.Monad.Except
-import           Control.Monad.Loops (whileM_)
+import           Control.Monad.Loops (whileM, whileM_)
 
 import           Data.Bifunctor
 import           Data.Bifoldable
@@ -82,7 +82,9 @@ import           Data.Set (Set)
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import           Data.List (partition, minimumBy)
-import           Data.Maybe (catMaybes, mapMaybe)
+import           Data.Maybe (catMaybes, mapMaybe, maybeToList)
+import           Data.Bool (bool)
+import           Data.Foldable (fold)
 
 import           Prelude as P hiding (reverse)
 
@@ -474,7 +476,7 @@ itop :: (Applicative f, Ord i, Eq e)
      => (i -> i -> e -> f e')
      -> (i -> v -> f v')
      -> Graph i e v -> Maybe (f (Graph i e' v'))
-itop fe fv g = actionsToGraph fe fv <$> execStateT top' ([], S.empty, g) ^? _Right . _1
+itop fe fv g = actionsToGraph fe fv <$> evalStateT top' (S.empty, g)
 
 -- | Perform a depth first/breadth first bitraversal of the subgraph reachable
 -- from the index. Note that these are not law abiding traversals unless the
@@ -510,66 +512,53 @@ delEdgeMerge g' g =
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the graph.
-dfs', bfs' :: Ord i => Graph i e v -> State ([Action i e v], Set i) ()
+dfs', bfs' :: Ord i => Graph i e v -> State (Set i) [Action i e v]
 dfs' = promoteFrom dfsFrom'
 bfs' = promoteFrom bfsFrom'
 
 -- | Stateful computation which calculates the topological traversal of the graph.
 -- This is an implementation of Kahn's algorithm.
-top' :: Ord i => StateT ([Action i e v], Set i, Graph i e v) (Either ()) ()
+top' :: Ord i => StateT (Set i, Graph i e v) Maybe [Action i e v]
 top' = do
   set <~ uses graph noIncoming
-  whileM_ (uses set $ not . null) $ do
+  acs <- fmap concat $ whileM (uses set $ not . null) $ do
     i <- zoom set $ state S.deleteFindMin
     g <- use graph
-    case g ^. at i of
-      Nothing -> throwError ()
-      Just v -> do
-        acs %= (Vert i v:)
-        forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
-          acs %= (Edge i i' e:)
-          g <- graph <%= delEdge i i'
-          when (hasn't (edgesTo i') g) (set %= S.insert i')
-  g <- use graph
-  when (size g > 0) $ throwError ()
+    v <- lift $ g ^. at i
+    fmap (Vert i v:) $ forM (g ^@.. iedgesFrom i) $ \(i', e) -> do
+      g <- graph <%= delEdge i i'
+      when (hasn't (edgesTo i') g) (set %= S.insert i')
+      return $ Edge i i' e
+  guard =<< uses graph (nullOf allEdges)
+  return acs
   where
     hasIncoming g = S.fromList $ map (snd . fst) $ g ^@.. iallEdges
     noIncoming g = idxSet g `S.difference` hasIncoming g
-    acs = _1
-    set = _2
-    graph = _3
+    set = _1
+    graph = _2
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the subgraph reached from a
 -- particular index.
-dfsFrom', bfsFrom' :: Ord i => i -> Graph i e v -> State ([Action i e v], Set i) ()
+dfsFrom', bfsFrom' :: Ord i => i -> Graph i e v -> State (Set i) [Action i e v]
 dfsFrom' i g = do
-  b <- set . contains i <<.= True
-  unless b $
-    forOf_ (ix i) g $ \v -> do
-      acs %= (Vert i v:)
-      forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
-        acs %= (Edge i i' e:)
-        dfsFrom' i' g
-  where
-    acs = _1
-    set = _2
-bfsFrom' start g = evalStateT (visit start >> loop) Seq.empty
+  b <- contains i <<.= True
+  fmap fold $ forM (guard (not b) >> g ^? ix i) $ \v ->
+    fmap ((Vert i v:) . concat) $ forM (g ^@.. iedgesFrom i) $ \(i', e) ->
+      (Edge i i' e:) <$> dfsFrom' i' g
+bfsFrom' start g = evalStateT ((++) <$> visit start <*> loop) Seq.empty
   where
     loop =
-      whileM_ (gets $ not . null) $ do
+      fmap fold $ whileM (gets $ not . null) $ do
         i <- state (\(Seq.viewl -> h Seq.:< t) -> (h, t))
-        forM_ (g ^@.. iedgesFrom i) $ \(i', e) -> do
-          lift (acs %= (Edge i i' e:))
-          visit i'
+        fmap fold $ forM (g ^@.. iedgesFrom i) $ \(i', e) ->
+          (Edge i i' e:) <$> visit i'
     visit i = do
-      b <- lift (use $ set . contains i)
-      unless b $ forOf_ (ix i) g $ \v -> do
-        lift (set %= S.insert i)
-        lift (acs %= (Vert i v:))
+      b <- lift (use $ contains i)
+      fmap maybeToList $ forM (guard (not b) >> g ^? ix i) $ \v -> do
+        lift (contains i .= True)
         modify (Seq.|> i)
-    acs = _1
-    set = _2
+        return $ Vert i v
 
 -- | Bitraversal of a path between the two given indices (if one exists).
 path :: (Applicative f, Ord i, Eq e) => i -> i
@@ -651,32 +640,28 @@ bellmanFord' weight i g = fmap fst $ (`execStateT` (M.empty, M.empty)) $ do
 -- a full traversal by repeatedly invoking the partial traversal on non-visited
 -- indices.
 promoteFrom :: Ord i
-            => (i -> Graph i e v -> State ([Action i e v], Set i) ())
-            -> Graph i e v -> State ([Action i e v], Set i) ()
+            => (i -> Graph i e v -> State (Set i) [Action i e v])
+            -> Graph i e v -> State (Set i) [Action i e v]
 promoteFrom fr g = do
-  let ks = idxSet g
-  s <- use _2
-  let s' = S.difference ks s
-  unless (null s') $ do
-    fr (S.findMin s') g
-    promoteFrom fr g
+  s <- gets $ S.difference $ idxSet g
+  if null s
+    then return []
+    else (++) <$> fr (S.findMin s) g <*> promoteFrom fr g
 
 -- | Promote a stateful generator of graph actions to a indexed bitraversal.
 travActs :: (Ord i, Applicative f)
          => (i -> i -> e -> f e')
          -> (i -> v -> f v')
-         -> (Graph i e v -> State ([Action i e v], Set i) ())
+         -> (Graph i e v -> State (Set i) [Action i e v])
          -> Graph i e v -> f (Graph i e' v')
-travActs fe fv trav g =
-  let acs = fst (execState (trav g) ([], S.empty))
-  in actionsToGraph fe fv acs
+travActs fe fv trav g = actionsToGraph fe fv $ evalState (trav g) S.empty
 
 -- | Convert a list of actions to a graph using the given applicative functions.
 actionsToGraph :: (Ord i, Applicative f)
                => (i -> i -> e -> f e')
                -> (i -> v -> f v')
                -> [Action i e v] -> f (Graph i e' v')
-actionsToGraph fe fv acs = construct <$> traverse flat (acs ^. reversed)
+actionsToGraph fe fv acs = construct <$> traverse flat acs
   where
     flat (Vert i v) = Vert i <$> fv i v
     flat (Edge i i' e) = Edge i i' <$> fe i i' e
