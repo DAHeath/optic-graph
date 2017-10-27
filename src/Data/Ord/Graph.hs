@@ -63,6 +63,7 @@ module Data.Ord.Graph
   , path, ipath
   , match, addCtxt
   , toDecomp, fromDecomp, decomp
+  , scc
   ) where
 
 import           Control.Arrow
@@ -725,6 +726,20 @@ instance (Ord i, Arbitrary i, Arbitrary e, Arbitrary v) => Arbitrary (Graph i e 
         e <- arbitrary
         return (i1, i2, e)
   shrink = const []
+
+scc :: Ord i => Graph i e v -> [[i]]
+scc = kosajaru
+
+kosajaru :: Ord i => Graph i e v -> [[i]]
+kosajaru g =
+  let l = execState (idfs noEdgeAction collectIdx g) []
+  in filter (not . null) $ fst $ foldr componentFrom ([], reverse g) l
+  where
+    noEdgeAction _ _ = return
+    collectIdx i v = modify (i:) >> return v
+    componentFrom i (comps, g) =
+      let comp = execState (idfsFrom i noEdgeAction collectIdx g) []
+      in (comp : comps, filterIdxs (`notElem` comp) g)
 
 t = fromLists [ ('a', 10)
               , ('b', 17)
