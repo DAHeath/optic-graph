@@ -24,6 +24,9 @@ main = hspec $
     it "delIdx should invert addVert" (property prop_addDelVert)
     it "filterVerts should remove edges" (property prop_filterVertsEdges)
 
+type Bitraversal s t a b c d =
+    forall f. Applicative f => (a -> f b) -> (c -> f d) -> s -> f t
+
 type IGraph = Graph Int Int Int
 
 prop_reverseInvolutive :: IGraph -> Bool

@@ -13,7 +13,16 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
+  ghc-options:         -Wall
   exposed-modules:     Data.Optic.Graph
+  other-modules:       Data.Optic.Graph.Graph
+                     , Data.Optic.Graph.Accessors
+                     , Data.Optic.Graph.EdgeFocused
+                     , Data.Optic.Graph.Ctxt
+                     , Data.Optic.Graph.Traversals
+                     , Data.Optic.Graph.TraversalVariants
+                     , Data.Optic.Graph.Scc
+                     , Data.Optic.Graph.Internal.Actions
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl
