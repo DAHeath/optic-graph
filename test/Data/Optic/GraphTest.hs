@@ -17,6 +17,8 @@ main = hspec $
     it "reversal should be involutive" (property prop_reverseInvolutive)
     it "dfs should be a valid traversal" (property (prop_bitravPure dfs))
     it "bfs should be a valid traversal" (property (prop_bitravPure bfs))
+    it "top should be a valid traversal" (property prop_top)
+    it "top should succeed when no cycles" (property prop_topMeansDag)
     it "travEdges should be a valid traversal" (property (prop_travPure travEdges))
     it "travVerts should be a valid traversal" (property (prop_travPure travVerts))
     it "addVert should increase order" (property prop_addVertOrder)
@@ -36,9 +38,20 @@ type IGraph = Graph Int Int Int
 prop_reverseInvolutive :: IGraph -> Bool
 prop_reverseInvolutive g = reverse (reverse g) == g
 
-prop_bitravPure :: Bitraversal IGraph IGraph Int Int Int Int
-              -> IGraph -> Bool
+prop_bitravPure :: Bitraversal IGraph IGraph Int Int Int Int -> IGraph -> Bool
 prop_bitravPure t g = t pure pure g == (pure g :: Identity IGraph)
+
+prop_top :: IGraph -> Bool
+prop_top g = case top pure pure g of
+  Nothing -> True
+  Just tr -> g == runIdentity tr
+
+prop_topMeansDag :: IGraph -> Bool
+prop_topMeansDag g = case top pure pure g of
+  Nothing -> True
+  Just tr ->
+    let g' = runIdentity tr
+    in all (\i -> i `notElem` descendants i g') (idxs g')
 
 prop_travPure :: Traversal IGraph IGraph Int Int -> IGraph -> Bool
 prop_travPure t g = t pure g == (pure g :: Identity IGraph)

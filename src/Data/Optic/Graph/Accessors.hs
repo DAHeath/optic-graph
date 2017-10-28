@@ -9,8 +9,11 @@ module Data.Optic.Graph.Accessors
 import Control.Lens
 
 import Data.Maybe (mapMaybe)
+import Data.List (nub)
 import Data.Optic.Graph.Graph
 import Data.Optic.Graph.Traversals
+
+import Prelude hiding (reverse)
 
 -- | The successor indices for the given index.
 successors :: Ord i => i -> Graph i e v -> [i]
@@ -21,10 +24,10 @@ predecessors :: Ord i => i -> Graph i e v -> [i]
 predecessors i = toListOf $ reversed . iedgesFrom i . asIndex
 
 descendants :: Ord i => i -> Graph i e v -> [i]
-descendants i g = filter (/= i) $ idxs (reached i g)
+descendants i g = nub $ map (snd.fst) $ reached i g ^@.. iallEdges
 
 ancestors :: Ord i => i -> Graph i e v -> [i]
-ancestors i g = filter (/= i) $ idxs (reaches i g)
+ancestors i g = descendants i (reverse g)
 
 -- | The number of vertices in the graph.
 order :: Integral n => Graph i e v -> n
