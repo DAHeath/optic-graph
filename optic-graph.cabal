@@ -1,4 +1,4 @@
-name:                ord-graph
+name:                optic-graph
 version:             0.1.0.0
 homepage:            https://github.com/DAHeath/ord-graph
 license:             BSD3
@@ -13,7 +13,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Data.Ord.Graph
+  exposed-modules:     Data.Optic.Graph
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl
@@ -26,9 +26,9 @@ library
 test-suite ord-graph-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
-  main-is:             Data/Ord/GraphTest.hs
+  main-is:             Data/Optic/GraphTest.hs
   build-depends:       base
-                     , ord-graph
+                     , optic-graph
                      , hspec
                      , QuickCheck
                      , lens
@@ -38,4 +38,4 @@ test-suite ord-graph-test
 
 source-repository head
   type:     git
-  location: https://github.com/DAHeath/ord-graph 
+  location: https://github.com/DAHeath/optic-graph

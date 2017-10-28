@@ -14,7 +14,7 @@
            #-}
 
 {-|
-Module      : Data.Ord.Graph
+Module      : Data.Optic.Graph
 Description : Directed Graphs with ordered indices.
 Copyright   : (c) David Heath, 2017
               License     : BSD3
@@ -28,7 +28,7 @@ manipulating the labels.
 The module is intended to be imported qualified, in conjunction with the lens
 library.
 -}
-module Data.Ord.Graph
+module Data.Optic.Graph
   ( Graph(..), vertMap, edgeMap
   , Ctxt(..), before, here, after
   , allVerts, iallVerts

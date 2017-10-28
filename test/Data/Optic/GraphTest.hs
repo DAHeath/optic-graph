@@ -4,7 +4,7 @@ module Main where
 import Control.Lens
 import Test.Hspec
 import Test.QuickCheck
-import Data.Ord.Graph
+import Data.Optic.Graph
 import qualified Data.Map as M
 import Prelude hiding (reverse)
 

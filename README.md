@@ -1,4 +1,4 @@
-# ord-graph
+# optic-graph
 
 Directed graphs with ordered indices, vertex labels, and edge labels.
 
