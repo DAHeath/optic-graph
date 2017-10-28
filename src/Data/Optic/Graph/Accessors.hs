@@ -20,11 +20,11 @@ successors i = toListOf $ iedgesFrom i . asIndex
 predecessors :: Ord i => i -> Graph i e v -> [i]
 predecessors i = toListOf $ reversed . iedgesFrom i . asIndex
 
-descendants :: Ord i => Graph i e v -> i -> [i]
-descendants g i = filter (/= i) $ idxs (reached i g)
+descendants :: Ord i => i -> Graph i e v -> [i]
+descendants i g = filter (/= i) $ idxs (reached i g)
 
-ancestors :: Ord i => Graph i e v -> i -> [i]
-ancestors g i = filter (/= i) $ idxs (reaches i g)
+ancestors :: Ord i => i -> Graph i e v -> [i]
+ancestors i g = filter (/= i) $ idxs (reaches i g)
 
 -- | The number of vertices in the graph.
 order :: Integral n => Graph i e v -> n
