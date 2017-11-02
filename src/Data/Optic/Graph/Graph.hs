@@ -23,6 +23,7 @@ module Data.Optic.Graph.Graph
   , filterEdges, ifilterEdges
   , filterIdxs
   , reverse
+  , cartesianProduct
   ) where
 
 import           Control.Lens
@@ -193,6 +194,31 @@ reverse :: Ord i => Graph i e v -> Graph i e v
 reverse g = foldr (\((i1, i2), e) -> addEdge i2 i1 e) onlyVerts (g ^@.. iallEdges)
   where
     onlyVerts = Graph (g ^. vertMap) M.empty
+
+-- | The graph created by the cartesian product of the two input graphs.
+cartesianProduct :: (Ord i1, Ord i2, Ord i3)
+                 => (i1 -> i2 -> i3)
+                 -> (v1 -> v2 -> v3)
+                 -> Graph i1 e v1 -> Graph i2 e v2 -> Graph i3 e v3
+cartesianProduct fi fv g1 g2 =
+ if has _Empty g2 then empty else
+ let vs1 = g1 ^@.. iallVerts
+     vs2 = g2 ^@.. iallVerts
+     vs = do
+       (i1, v1) <- vs1
+       (i2, v2) <- vs2
+       return (fi i1 i2, fv v1 v2)
+     es1 = g1 ^@.. iallEdges
+     es2 = g2 ^@.. iallEdges
+     es1' = do
+       (i2, _) <- vs2
+       ((i1, i1'), e) <- es1
+       return (fi i1 i2, fi i1' i2, e)
+     es2' = do
+       (i1, _) <- vs1
+       ((i2, i2'), e) <- es2
+       return (fi i1 i2, fi i1 i2', e)
+     in fromLists vs (es1' ++ es2')
 
 instance Ord i => Reversing (Graph i e v) where
   reversing = reverse
