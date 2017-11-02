@@ -6,7 +6,7 @@ module Data.Optic.Graph.Traversals
   , idfsFrom, ibfsFrom
   , ipath
 
-  , reached, reaches
+  , reached, reaches, between
   ) where
 
 import           Control.Lens
@@ -140,6 +140,14 @@ reached i = runIdentity . travActs (\_ _ e -> Identity e) (\_ v -> Identity v) (
 -- | The subgraph that reaches the given index.
 reaches :: Ord i => i -> Graph i e v -> Graph i e v
 reaches i = reverse . reached i . reverse
+
+-- | Find the subgraph occurring between the two indices.
+between :: Ord i => i -> i -> Graph i e v -> Graph i e v
+between i1 i2 g =
+  let is1 = idxSet (reached i1 g)
+      is2 = idxSet (reaches i2 g)
+      is = S.intersection is1 is2
+  in filterIdxs (`elem` is) g
 
 -- | Dijkstra/Bellman Ford shortest path from the given index. The result is a map
 -- of the index to the information required to reconstruct the path the index's

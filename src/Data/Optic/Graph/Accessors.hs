@@ -4,6 +4,7 @@ module Data.Optic.Graph.Accessors
   , connections
   , order, size
   , elemVert, elemEdge
+  , backEdges, withoutBackEdges
   ) where
 
 import Control.Lens
@@ -53,3 +54,12 @@ connections g =
     v1 <- g ^? ix i1
     v2 <- g ^? ix i2
     return ((i1, v1), e, (i2, v2))) es
+
+-- | Find the edges in the graph which travel against the ordering of the indices.
+backEdges :: Ord i => Graph i e v -> [((i, i), e)]
+backEdges g = filter (\((i1, i2), _) -> i2 <= i1) $ g ^@.. iallEdges
+
+-- | Filter out backedges.
+withoutBackEdges :: Ord i => Graph i e v -> Graph i e v
+withoutBackEdges g =
+  ifilterEdges (\i1 i2 _ -> (i1, i2) `notElem` map fst (backEdges g)) g
