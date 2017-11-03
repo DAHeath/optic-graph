@@ -15,7 +15,8 @@ module Data.Optic.Graph.Graph
   , iedgesTo, iedgesFrom, iallEdges
   , idxs, idxSet
   , empty, fromLists, union, unionWith
-  , addVert, addEdge
+  , addVert, addVertWith
+  , addEdge, addEdgeWith
   , delVert
   , delEdgeBy, delEdge
   , delIdx
@@ -23,7 +24,7 @@ module Data.Optic.Graph.Graph
   , filterEdges, ifilterEdges
   , filterIdxs
   , reverse
-  , cartesianProduct
+  , cartesianProduct, cartesianProductWith
   ) where
 
 import           Control.Lens
@@ -105,19 +106,26 @@ empty :: Graph i e v
 empty = Graph M.empty M.empty
 
 -- | Build a graph from a list of labelled vertices and labelled edges.
-fromLists :: Ord k => [(k, v)] -> [(k, k, e)] -> Graph k e v
-fromLists vs = foldr (\(i1, i2, e) -> addEdge i1 i2 e) (foldr (uncurry addVert) empty vs)
+fromLists :: Ord i => [(i, v)] -> [(i, i, e)] -> Graph i e v
+fromLists = fromListsWith const const
 
--- | Combine two graphs. If both graph have a vertex/edge at the same index, use the
--- vertex label from the first graph.
+-- | Build a graph from a list of labelled vertices and labelled edges, combining
+-- vertices and edges at matching indices using the provided functions.
+fromListsWith :: Ord i => (e -> e -> e) -> (v -> v -> v)
+              -> [(i, v)] -> [(i, i, e)] -> Graph i e v
+fromListsWith fe fv vs =
+  foldr (\(i1, i2, e) -> addEdgeWith fe i1 i2 e) (foldr (uncurry (addVertWith fv)) empty vs)
+
+-- | Combine two graphs. If both graph have a vertex/edge at the same index, use
+-- the vertex label from the first graph.
 union :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
 union = unionWith const const
 
 -- | Combine two graphs. If both graphs have a vertex at the same index, use the
 -- provided function to decide how to generate the new vertex at the index.
-unionWith :: Ord i => (v -> v -> v) -> (e -> e -> e)
+unionWith :: Ord i => (e -> e -> e) -> (v -> v -> v)
           -> Graph i e v -> Graph i e v -> Graph i e v
-unionWith fv fe (Graph v1 f1) (Graph v2 f2) =
+unionWith fe fv (Graph v1 f1) (Graph v2 f2) =
   Graph (M.unionWith fv v1 v2)
         (M.unionWith (M.unionWith fe) f1 f2)
 
@@ -131,14 +139,27 @@ instance AsEmpty (Graph i e v) where
 
 -- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph i e v -> Graph i e v
-addVert i v = at i ?~ v
+addVert = addVertWith const
+
+-- | Add a vertex at the index, or combine the new vertex label with the existing
+-- one using the provided function.
+addVertWith :: Ord i => (v -> v -> v) -> i -> v -> Graph i e v -> Graph i e v
+addVertWith fv i v = vertMap %~ M.insertWith fv i v
 
 -- | Add an edge between two indices in the graph if both indices have vertices. If
 -- they do not, the graph is unchanged.
+-- If there is already an edge between the two indices, replace it with the new edge.
 addEdge :: Ord i => i -> i -> e -> Graph i e v -> Graph i e v
-addEdge i1 i2 e g = g &
+addEdge = addEdgeWith const
+
+-- | Add an edge between two indices in the graph if both indices have vertices. If
+-- they do not, the graph is unchanged.
+-- If there is already an edge between the two indices, combine the two using the
+-- provided function.
+addEdgeWith :: Ord i => (e -> e -> e) -> i -> i -> e -> Graph i e v -> Graph i e v
+addEdgeWith fe i1 i2 e g = g &
   if has (ix i1) g && has (ix i2) g
-  then edgeMap . at i1 . non' _Empty . at i2 ?~ e
+  then edgeMap . at i1 . non' _Empty %~ M.insertWith fe i2 e
   else id
 
 -- | Delete all vertices that are equal to the given value.
@@ -195,19 +216,28 @@ reverse g = foldr (\((i1, i2), e) -> addEdge i2 i1 e) onlyVerts (g ^@.. iallEdge
   where
     onlyVerts = Graph (g ^. vertMap) M.empty
 
--- | The graph created by the cartesian product of the two input graphs.
-cartesianProduct :: (Ord i1, Ord i2, Ord i3)
+cartesianProduct :: Ord i3
                  => (i1 -> i2 -> i3)
                  -> (v1 -> v2 -> v3)
                  -> Graph i1 e v1 -> Graph i2 e v2 -> Graph i3 e v3
-cartesianProduct fi fv g1 g2 =
+cartesianProduct = cartesianProductWith const const
+
+-- | The graph created by the cartesian product of the two input graphs.
+-- Combine coincident edges and vertices using the provided functions.
+cartesianProductWith :: Ord i3
+                     => (e -> e -> e)
+                     -> (v3 -> v3 -> v3)
+                     -> (i1 -> i2 -> i3)
+                     -> (v1 -> v2 -> v3)
+                     -> Graph i1 e v1 -> Graph i2 e v2 -> Graph i3 e v3
+cartesianProductWith fe fv fi prod g1 g2 =
  if has _Empty g2 then empty else
  let vs1 = g1 ^@.. iallVerts
      vs2 = g2 ^@.. iallVerts
      vs = do
        (i1, v1) <- vs1
        (i2, v2) <- vs2
-       return (fi i1 i2, fv v1 v2)
+       return (fi i1 i2, prod v1 v2)
      es1 = g1 ^@.. iallEdges
      es2 = g2 ^@.. iallEdges
      es1' = do
@@ -218,7 +248,7 @@ cartesianProduct fi fv g1 g2 =
        (i1, _) <- vs1
        ((i2, i2'), e) <- es2
        return (fi i1 i2, fi i1 i2', e)
-     in fromLists vs (es1' ++ es2')
+     in fromListsWith fe fv vs (es1' ++ es2')
 
 instance Ord i => Reversing (Graph i e v) where
   reversing = reverse
