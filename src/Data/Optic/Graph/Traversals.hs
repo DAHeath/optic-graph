@@ -1,19 +1,20 @@
-{-# LANGUAGE FlexibleContexts, ViewPatterns, NoMonomorphismRestriction #-}
+{-# LANGUAGE FlexibleContexts, ViewPatterns, NoMonomorphismRestriction
+           , GADTs, ExistentialQuantification, RankNTypes #-}
 module Data.Optic.Graph.Traversals
   ( ibitraverse
   , reached, reaches, between
 
-  , mapVerts, imapVerts
-  , mapEdges, imapEdges
-  , mapIdxs
+  , mapVert, imapVert
+  , mapEdge, imapEdge
+  , mapIdx
 
-  , foldVerts, ifoldVerts
-  , foldEdges, ifoldEdges
-  , foldIdxs
+  , foldVert, ifoldVert
+  , foldEdge, ifoldEdge
+  , foldIdx
 
-  , travVerts, itravVerts
-  , travEdges, itravEdges
-  , travIdxs
+  , travVert, itravVert
+  , travEdge, itravEdge
+  , travIdx
 
   , idfs
   , idfsVert, idfsEdge
@@ -279,376 +280,264 @@ kosajaru g =
 
 
 -- | Apply the given function to all vertices.
-mapVerts :: (v -> v') -> Graph i e v -> Graph i e v'
-mapVerts = fmap
+mapVert :: (v -> v') -> Graph i e v -> Graph i e v'
+mapVert = fmap
 
 -- | Apply the given function to all vertices, taking each vertex's index as an
 -- additional argument.
-imapVerts :: (i -> v -> v') -> Graph i e v -> Graph i e v'
-imapVerts = imap
+imapVert :: (i -> v -> v') -> Graph i e v -> Graph i e v'
+imapVert = imap
 
 -- | Apply the given function to all edges.
-mapEdges :: (e -> e') -> Graph i e v -> Graph i e' v
-mapEdges = under (from edgeFocused) . fmap
+mapEdge :: (e -> e') -> Graph i e v -> Graph i e' v
+mapEdge = under (from edgeFocused) . fmap
 
 -- | Apply the given function to all edges, taking each edge's indices as
 -- additional arguments.
-imapEdges :: (i -> i -> e -> e') -> Graph i e v -> Graph i e' v
-imapEdges = under (from edgeFocused) . imap . uncurry
+imapEdge :: (i -> i -> e -> e') -> Graph i e v -> Graph i e' v
+imapEdge = under (from edgeFocused) . imap . uncurry
 
 -- | The map obtained by applying f to each index of s.
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
-mapIdxs :: Ord i' => (i -> i') -> Graph i e v -> Graph i' e v
-mapIdxs f (Graph vs es) =
+mapIdx :: Ord i' => (i -> i') -> Graph i e v -> Graph i' e v
+mapIdx f (Graph vs es) =
   Graph (M.mapKeys f vs)
         (M.mapKeys f $ fmap (M.mapKeys f) es)
 
 -- | Aggregate the vertices.
-foldVerts :: (v -> b -> b) -> b -> Graph i e v -> b
-foldVerts = foldr
+foldVert :: (v -> b -> b) -> b -> Graph i e v -> b
+foldVert = foldr
 
 -- | Aggregate the vertices with the vertex index as an additional argument.
-ifoldVerts :: (i -> v -> b -> b) -> b -> Graph i e v -> b
-ifoldVerts = ifoldr
+ifoldVert :: (i -> v -> b -> b) -> b -> Graph i e v -> b
+ifoldVert = ifoldr
 
 -- | Aggregate the edges.
-foldEdges :: (e -> b -> b) -> b -> Graph i e v -> b
-foldEdges f acc g = foldr f acc (EdgeFocused g)
+foldEdge :: (e -> b -> b) -> b -> Graph i e v -> b
+foldEdge f acc g = foldr f acc (EdgeFocused g)
 
 -- | Aggregate the edges with the edge indices as additional arguments.
-ifoldEdges :: (i -> i -> e -> b -> b) -> b -> Graph i e v -> b
-ifoldEdges f acc g = ifoldr (uncurry f) acc (EdgeFocused g)
+ifoldEdge :: (i -> i -> e -> b -> b) -> b -> Graph i e v -> b
+ifoldEdge f acc g = ifoldr (uncurry f) acc (EdgeFocused g)
 
 -- | Aggregate the indices.
-foldIdxs :: (i -> b -> b) -> b -> Graph i e v -> b
-foldIdxs f acc g = foldr f acc (idxs g)
+foldIdx :: (i -> b -> b) -> b -> Graph i e v -> b
+foldIdx f acc g = foldr f acc (idxs g)
 
 -- | Traverse the vertices.
-travVerts :: Applicative f => (v -> f v') -> Graph i e v -> f (Graph i e v')
-travVerts = traverse
+travVert :: Applicative f => (v -> f v') -> Graph i e v -> f (Graph i e v')
+travVert = traverse
 
 -- | Indexed vertex traversal.
-itravVerts :: Applicative f => (i -> v -> f v') -> Graph i e v -> f (Graph i e v')
-itravVerts = itraverse
+itravVert :: Applicative f => (i -> v -> f v') -> Graph i e v -> f (Graph i e v')
+itravVert = itraverse
 
 -- | Traverse the edges.
-travEdges :: Applicative f => (e -> f e') -> Graph i e v -> f (Graph i e' v)
-travEdges = allEdges
+travEdge :: Applicative f => (e -> f e') -> Graph i e v -> f (Graph i e' v)
+travEdge = allEdges
 
 -- | Indexed edge traversal.
-itravEdges :: Applicative f => (i -> i -> e -> f e') -> Graph i e v -> f (Graph i e' v)
-itravEdges f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
+itravEdge :: Applicative f => (i -> i -> e -> f e') -> Graph i e v -> f (Graph i e' v)
+itravEdge f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
 
 -- | Traverse the indices.
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
-travIdxs :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
-travIdxs f g =
+travIdx :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
+travIdx f g =
   replace (idxs g) <$> traverse f (idxs g)
   where
     replace is is' =
       let m = M.fromList (zip is is')
-      in mapIdxs (\i -> m M.! i) g
-
-
-idfsVert, ibfsVert :: (Ord i, Applicative f)
-                   => (i -> v -> f v') -> Graph i e v -> f (Graph i e v')
-idfsVert = idfs (\_ _ -> pure)
-ibfsVert = ibfs (\_ _ -> pure)
-
-idfsEdge, ibfsEdge :: (Ord i, Applicative f)
-                   => (i -> i -> e -> f e') -> Graph i e v -> f (Graph i e' v)
-idfsEdge  fe = idfs fe (const pure)
-ibfsEdge  fe = ibfs fe (const pure)
-
-idfs_, ibfs_ :: (Ord i, Applicative f)
-             => (i -> i -> e -> f e') -> (i -> v -> f v') -> Graph i e v -> f ()
-idfs_ fe fv = void . idfs fe fv
-ibfs_ fe fv = void . ibfs fe fv
-
-idfsVert_, ibfsVert_ :: (Applicative f, Ord i)
-                     => (i -> v -> f v') -> Graph i e v -> f ()
-idfsVert_ fv = void . idfsVert fv
-ibfsVert_ fv = void . ibfsVert fv
-
-idfsEdge_, ibfsEdge_ :: (Applicative f, Ord i)
-                     => (i -> i -> e -> f e') -> Graph i e v -> f ()
-idfsEdge_ fe = void . idfsEdge fe
-ibfsEdge_ fe = void . ibfsEdge fe
-
-dfs, bfs :: (Ord i, Applicative f)
-         => (e -> f e') -> (v -> f v') -> Graph i e v -> f (Graph i e' v')
-dfs fe fv = idfs (\_ _ -> fe) (const fv)
-bfs fe fv = ibfs (\_ _ -> fe) (const fv)
-
-dfsVert, bfsVert :: (Applicative f, Ord i)
-                 => (v -> f v') -> Graph i e v -> f (Graph i e v')
-dfsVert = dfs pure
-bfsVert = bfs pure
-
-dfsEdge, bfsEdge :: (Applicative f, Ord i)
-                 => (e -> f e') -> Graph i e v -> f (Graph i e' v)
-dfsEdge fe = dfs fe pure
-bfsEdge fe = bfs fe pure
-
-dfs_, bfs_ :: (Applicative f, Ord i)
-           => (e -> f e') -> (v -> f v') -> Graph i e v -> f ()
-dfs_ fe fv = void . dfs fe fv
-bfs_ fe fv = void . bfs fe fv
-
-dfsVert_, bfsVert_ :: (Ord i, Applicative f)
-                   => (v -> f v') -> Graph i e v -> f ()
-dfsVert_ fv = void . dfsVert fv
-bfsVert_ fv = void . bfsVert fv
-
-dfsEdge_, bfsEdge_ :: (Ord i, Applicative f)
-                   => (e -> f e') -> Graph i e v -> f ()
-dfsEdge_ fe = void . dfsEdge fe
-bfsEdge_ fe = void . bfsEdge fe
-
-dfsIdx_, bfsIdx_ :: (Applicative f, Ord i)
-                 => (i -> f i') -> Graph i e v -> f ()
-dfsIdx_ fi = void . idfsVert (\i _ -> fi i)
-bfsIdx_ fi = void . ibfsVert (\i _ -> fi i)
-
-dfsIdxs, bfsIdxs :: Ord i => Graph i e v -> [i]
-dfsIdxs g = reversing $ execState (dfsIdx_ (\i -> modify (i:)) g) []
-bfsIdxs g = reversing $ execState (bfsIdx_ (\i -> modify (i:)) g) []
-
--- | Maybe traversal variants
-
-itopVert :: (Ord i, Applicative f)
-         => (i -> v -> f v') -> Graph i e v -> Maybe (f (Graph i e v'))
-itopVert = itop (\_ _ -> pure)
-
-itopEdge :: (Ord i, Applicative f)
-         => (i -> i -> e -> f e') -> Graph i e v -> Maybe (f (Graph i e' v))
-itopEdge fe = itop fe (const pure)
-
-itop_ :: (Ord i, Applicative f)
-      => (i -> i -> e -> f e') -> (i -> v -> f v') -> Graph i e v -> Maybe (f ())
-itop_ fe fv g = void <$> itop fe fv g
-
-itopVert_ :: (Applicative f, Ord i)
-          => (i -> v -> f v') -> Graph i e v -> Maybe (f ())
-itopVert_ fv g = void <$> itopVert fv g
-
-itopEdge_ :: (Applicative f, Ord i)
-          => (i -> i -> e -> f e') -> Graph i e v -> Maybe (f ())
-itopEdge_ fe g = void <$> itopEdge fe g
-
-top :: (Ord i, Applicative f)
-    => (e -> f e') -> (v -> f v') -> Graph i e v -> Maybe (f (Graph i e' v'))
-top fe fv = itop (\_ _ -> fe) (const fv)
-
-topVert :: (Applicative f, Ord i)
-        => (v -> f v') -> Graph i e v -> Maybe (f (Graph i e v'))
-topVert = top pure
-
-topEdge :: (Applicative f, Ord i)
-        => (e -> f e') -> Graph i e v -> Maybe (f (Graph i e' v))
-topEdge fe = top fe pure
-
-top_ :: (Applicative f, Ord i)
-     => (e -> f e') -> (v -> f v') -> Graph i e v -> Maybe (f ())
-top_ fe fv g = void <$> top fe fv g
-
-topVert_ :: (Ord i, Applicative f)
-         => (v -> f v') -> Graph i e v -> Maybe (f ())
-topVert_ fv g = void <$> topVert fv g
-
-topEdge_ :: (Ord i, Applicative f)
-         => (e -> f e') -> Graph i e v -> Maybe (f ())
-topEdge_ fe g = void <$> topEdge fe g
-
-topIdx_ :: (Applicative f, Ord i)
-        => (i -> f i') -> Graph i e v -> Maybe (f ())
-topIdx_ fi g = void <$> itopVert (\i _ -> fi i) g
-
-topIdxs :: Ord i => Graph i e v -> Maybe [i]
-topIdxs g = reversing <$> (execState <$> topIdx_ (\i -> modify (i:)) g <*> pure [])
-
--- | Partial traversals
-
-idfsFromVert, ibfsFromVert :: (Ord i, Applicative f)
-                           => i -> (i -> v -> f v) -> Graph i e v -> f (Graph i e v)
-idfsFromVert i = idfsFrom i (\_ _ -> pure)
-ibfsFromVert i = ibfsFrom i (\_ _ -> pure)
-
-idfsFromEdge, ibfsFromEdge :: (Ord i, Applicative f)
-                           => i -> (i -> i -> e -> f e) -> Graph i e v -> f (Graph i e v)
-idfsFromEdge i fe = idfsFrom i fe (const pure)
-ibfsFromEdge i fe = ibfsFrom i fe (const pure)
-
-idfsFrom_, ibfsFrom_ :: (Ord i, Applicative f)
-                     => i -> (i -> i -> e -> f e') -> (i -> v -> f v') -> Graph i e v -> f ()
-idfsFrom_ i fe fv = void . idfsFrom i (\i1 i2 e -> fe i1 i2 e *> pure e)
-                                      (\i' v -> fv i' v *> pure v)
-ibfsFrom_ i fe fv = void . ibfsFrom i (\i1 i2 e -> fe i1 i2 e *> pure e)
-                                      (\i' v -> fv i' v *> pure v)
-
-idfsFromVert_, ibfsFromVert_ :: (Applicative f, Ord i)
-                             => i -> (i -> v -> f v') -> Graph i e v -> f ()
-idfsFromVert_ i fv = void . idfsFromVert i (\i' v -> fv i' v *> pure v)
-ibfsFromVert_ i fv = void . ibfsFromVert i (\i' v -> fv i' v *> pure v)
-
-idfsFromEdge_, ibfsFromEdge_ :: (Applicative f, Ord i)
-                             => i -> (i -> i -> e -> f e') -> Graph i e v -> f ()
-idfsFromEdge_ i fe = void . idfsFromEdge i (\i1 i2 e -> fe i1 i2 e *> pure e)
-ibfsFromEdge_ i fe = void . ibfsFromEdge i (\i1 i2 e -> fe i1 i2 e *> pure e)
-
-dfsFrom, bfsFrom :: (Ord i, Applicative f)
-                 => i -> (e -> f e) -> (v -> f v) -> Graph i e v -> f (Graph i e v)
-dfsFrom i fe fv = idfsFrom i (\_ _ -> fe) (const fv)
-bfsFrom i fe fv = ibfsFrom i (\_ _ -> fe) (const fv)
-
-dfsFromVert, bfsFromVert :: (Applicative f, Ord i)
-                         => i -> (v -> f v) -> Graph i e v -> f (Graph i e v)
-dfsFromVert i = dfsFrom i pure
-bfsFromVert i = bfsFrom i pure
-
-dfsFromEdge, bfsFromEdge :: (Applicative f, Ord i)
-                         => i -> (e -> f e) -> Graph i e v -> f (Graph i e v)
-dfsFromEdge i fe = dfsFrom i fe pure
-bfsFromEdge i fe = bfsFrom i fe pure
-
-dfsFrom_, bfsFrom_ :: (Applicative f, Ord i)
-                   => i -> (e -> f e') -> (v -> f v') -> Graph i e v -> f ()
-dfsFrom_ i fe fv = void . dfsFrom i (\e -> fe e *> pure e) (\v -> fv v *> pure v)
-bfsFrom_ i fe fv = void . bfsFrom i (\e -> fe e *> pure e) (\v -> fv v *> pure v)
-
-dfsFromVert_, bfsFromVert_ :: (Ord i, Applicative f)
-                   => i -> (v -> f v') -> Graph i e v -> f ()
-dfsFromVert_ i fv = void . dfsFromVert i (\v -> fv v *> pure v)
-bfsFromVert_ i fv = void . bfsFromVert i (\v -> fv v *> pure v)
-
-dfsFromEdge_, bfsFromEdge_ :: (Ord i, Applicative f)
-                           => i -> (e -> f e') -> Graph i e v -> f ()
-dfsFromEdge_ i fe = void . dfsFromEdge i (\e -> fe e *> pure e)
-bfsFromEdge_ i fe = void . bfsFromEdge i (\e -> fe e *> pure e)
-
-dfsFromIdx_, bfsFromIdx_ :: (Applicative f, Ord i)
-                         => i -> (i -> f i') -> Graph i e v -> f ()
-dfsFromIdx_ i fi = void . idfsFromVert i (\i' v -> fi i' *> pure v)
-bfsFromIdx_ i fi = void . ibfsFromVert i (\i' v -> fi i' *> pure v)
-
-dfsFromIdxs, bfsFromIdxs :: Ord i => i -> Graph i e v -> [i]
-dfsFromIdxs i g = reversing $ execState (dfsFromIdx_ i (\i' -> modify (i':)) g) []
-bfsFromIdxs i g = reversing $ execState (bfsFromIdx_ i (\i' -> modify (i':)) g) []
-
--- | Path traversals
-
-ipathVert :: (Ord i, Applicative f)
-          => i -> i -> (i -> v -> f v) -> Graph i e v -> Maybe (f (Graph i e v))
-ipathVert i1 i2 = ipath i1 i2 (\_ _ -> pure)
-
-ipathEdge :: (Ord i, Applicative f)
-          => i -> i -> (i -> i -> e -> f e) -> Graph i e v -> Maybe (f (Graph i e v))
-ipathEdge i1 i2 fe = ipath i1 i2 fe (const pure)
-
-ipath_ :: (Ord i, Applicative f)
-       => i -> i -> (i -> i -> e -> f e') -> (i -> v -> f v') -> Graph i e v -> Maybe (f ())
-ipath_ i1 i2 fe fv g = void <$> ipath i1 i2
-  (\i1' i2' e -> fe i1' i2' e *> pure e)
-  (\i v -> fv i v *> pure v) g
-
-ipathVert_ :: (Applicative f, Ord i)
-           => i -> i -> (i -> v -> f v') -> Graph i e v -> Maybe (f ())
-ipathVert_ i1 i2 fv g = void <$> ipathVert i1 i2 (\i v -> fv i v *> pure v) g
-
-ipathEdge_ :: (Applicative f, Ord i)
-           => i -> i -> (i -> i -> e -> f e') -> Graph i e v -> Maybe (f ())
-ipathEdge_ i1 i2 fe g = void <$> ipathEdge i1 i2 (\i1' i2' e -> fe i1' i2' e *> pure e) g
-
-path :: (Ord i, Applicative f)
-     => i -> i -> (e -> f e) -> (v -> f v) -> Graph i e v -> Maybe (f (Graph i e v))
-path i1 i2 fe fv = ipath i1 i2 (\_ _ -> fe) (const fv)
-
-pathVert :: (Applicative f, Ord i)
-         => i -> i -> (v -> f v) -> Graph i e v -> Maybe (f (Graph i e v))
-pathVert i1 i2 = path i1 i2 pure
-
-pathEdge :: (Applicative f, Ord i)
-         => i -> i -> (e -> f e) -> Graph i e v -> Maybe (f (Graph i e v))
-pathEdge i1 i2 fe = path i1 i2 fe pure
-
-path_ :: (Applicative f, Ord i)
-      => i -> i -> (e -> f e') -> (v -> f v') -> Graph i e v -> Maybe (f ())
-path_ i1 i2 fe fv g = void <$> path i1 i2 (\e -> fe e *> pure e)
-                                          (\v -> fv v *> pure v) g
-
-pathVert_ :: (Ord i, Applicative f)
-          => i -> i -> (v -> f v') -> Graph i e v -> Maybe (f ())
-pathVert_ i1 i2 fv g = void <$> pathVert i1 i2 (\v -> fv v *> pure v) g
-
-pathEdge_ :: (Ord i, Applicative f)
-         => i -> i -> (e -> f e') -> Graph i e v -> Maybe (f ())
-pathEdge_ i1 i2 fe g = void <$> pathEdge i1 i2 (\e -> fe e *> pure e) g
-
-pathIdx_ :: (Applicative f, Ord i)
-         => i -> i -> (i -> f i') -> Graph i e v -> Maybe (f ())
-pathIdx_ i1 i2 fi g = void <$> ipathVert i1 i2 (\i v -> fi i *> pure v) g
-
-pathIdxs :: Ord i => i -> i -> Graph i e v -> Maybe [i]
-pathIdxs i1 i2 g =
-  fmap (\ac -> reversing $ execState ac []) (pathIdx_ i1 i2 (\i -> modify (i:)) g)
-
--- | Multi, partial traversals
-
-isccVert :: (Applicative f, Ord i)
-         => (i -> v -> f v) -> Graph i e v -> [f (Graph i e v)]
-isccVert = iscc (\_ _ -> pure)
-
-isccEdge :: (Applicative f, Ord i)
-         => (i -> i -> e -> f e) -> Graph i e v -> [f (Graph i e v)]
-isccEdge fe = iscc fe (const pure)
-
-iscc_ :: (Applicative f, Ord i)
-      => (i -> i -> e -> f e')
-      -> (i -> v -> f v')
-      -> Graph i e v -> [f ()]
-iscc_ fe fv = map void . iscc (\i1 i2 e -> fe i1 i2 e *> pure e)
-                              (\i v -> fv i v *> pure v)
-
-isccVert_ :: (Applicative f, Ord i)
-          => (i -> v -> f v')
-          -> Graph i e v -> [f ()]
-isccVert_ = iscc_ (\_ _ _ -> pure ())
-
-isccEdge_ :: (Applicative f, Ord i)
-          => (i -> i -> e -> f e')
-          -> Graph i e v -> [f ()]
-isccEdge_ fe = iscc_ fe (\_ _ -> pure ())
-
-scc :: (Applicative f, Ord i)
-    => (e -> f e)
-    -> (v -> f v)
-    -> Graph i e v -> [f (Graph i e v)]
-scc fe fv = iscc (\_ _ -> fe) (const fv)
-
-sccVert :: (Applicative f, Ord i) => (v -> f v) -> Graph i e v -> [f (Graph i e v)]
-sccVert = scc pure
-
-sccEdge :: (Applicative f, Ord i) => (e -> f e) -> Graph i e v -> [f (Graph i e v)]
-sccEdge fe = scc fe pure
-
-scc_ :: (Applicative f, Ord i)
-     => (e -> f e')
-     -> (v -> f v')
-     -> Graph i e v -> [f ()]
-scc_ fe fv = map void . scc (\e -> fe e *> pure e) (\v -> fv v *> pure v)
-
-sccVert_ :: (Applicative f, Ord i) => (v -> f v') -> Graph i e v -> [f ()]
-sccVert_ = scc_ (\_ -> pure ())
-
-sccEdge_ :: (Applicative f, Ord i) => (e -> f e') -> Graph i e v -> [f ()]
-sccEdge_ fe = scc_ fe (\_ -> pure ())
-
-sccIdx_ :: (Applicative f, Ord i) => (i -> f i') -> Graph i e v -> [f ()]
-sccIdx_ fi = isccVert_ (\i _ -> fi i)
-
-sccIdxs :: Ord i => Graph i e v -> [[i]]
-sccIdxs g = map (\ac -> reversing $ execState ac []) (sccIdx_ (\i -> modify (i:)) g)
+      in mapIdx (\i -> m M.! i) g
+
+data Trav g f i e e' v v' = Trav
+  { getitrav :: (i -> i -> e -> f e')
+             -> (i -> v -> f v')
+             -> Graph i e v -> g (f (Graph i e' v'))
+  , getitravVert :: (e' ~ e)
+                 => (i -> v -> f v')
+                 -> Graph i e v -> g (f (Graph i e v'))
+  , getitravEdge :: (v' ~ v)
+                 => (i -> i -> e -> f e')
+                 -> Graph i e v -> g (f (Graph i e' v))
+  , getitrav_ :: forall e'' v''. (e' ~ e, v' ~ v)
+              => (i -> i -> e -> f e'')
+              -> (i -> v -> f v'')
+              -> Graph i e v -> g (f ())
+  , getitravVert_ :: forall v''. (e' ~ e, v' ~ v)
+                  => (i -> v -> f v'')
+                  -> Graph i e v -> g (f ())
+  , getitravEdge_ :: forall e'' v''. (e' ~ e, v' ~ v)
+                  => (i -> i -> e -> f e'')
+                  -> Graph i e v -> g (f ())
+  , gettrav :: (e -> f e')
+            -> (v -> f v')
+            -> Graph i e v -> g (f (Graph i e' v'))
+  , gettravVert :: (e' ~ e)
+                => (v -> f v')
+                -> Graph i e v -> g (f (Graph i e' v'))
+  , gettravEdge :: (v' ~ v)
+                => (e -> f e')
+                -> Graph i e v -> g (f (Graph i e' v'))
+  , gettrav_ :: forall e'' v''. (e' ~ e, v' ~ v)
+             => (e -> f e'')
+             -> (v -> f v'')
+             -> Graph i e v -> g (f ())
+  , gettravVert_ :: forall v''. (e' ~ e, v' ~ v)
+                 => (v -> f v'')
+                 -> Graph i e v -> g (f ())
+  , gettravEdge_ :: forall e''. (e' ~ e, v' ~ v)
+                 => (e -> f e'')
+                 -> Graph i e v -> g (f ())
+  , gettravIdx_ :: forall i'. (e' ~ e, v' ~ v)
+                => (i -> f i')
+                -> Graph i e v -> g (f ())
+  , gettravIdxs :: (e' ~ e, v' ~ v, f ~ State [i]) => Graph i e v -> g [i]
+  }
+
+mkTrav :: (Functor g, Applicative f, Ord i)
+       => ((i -> i -> e -> f e')
+           -> (i -> v -> f v')
+           -> Graph i e v -> g (f (Graph i e' v')))
+       -> Trav g f i e e' v v'
+mkTrav itrav =
+  let theTrav = Trav
+        { getitrav = itrav
+        , getitravVert = itrav (\_ _ -> pure)
+        , getitravEdge = \fe -> itrav fe (const pure)
+        , getitrav_ = \fe fv -> fmap void . itrav (\i1 i2 e -> fe i1 i2 e *> pure e)
+                                               (\i v -> fv i v *> pure v)
+        , getitravVert_ = getitrav_ theTrav (\_ _ _ -> pure ())
+        , getitravEdge_ = \fe -> getitrav_ theTrav fe (\_ _ -> pure ())
+        , gettrav = \fe fv -> itrav (\_ _ -> fe) (const fv)
+        , gettravVert = gettrav theTrav pure
+        , gettravEdge = \fe -> gettrav theTrav fe pure
+        , gettrav_ = \fe fv -> fmap void . gettrav theTrav (\e -> fe e *> pure e)
+                                                     (\v -> fv v *> pure v)
+        , gettravVert_ = gettrav_ theTrav (\_ -> pure ())
+        , gettravEdge_ = \fe -> gettrav_ theTrav fe (\_ -> pure ())
+        , gettravIdx_ = \fi -> getitravVert_ theTrav (\i _ -> fi i)
+        , gettravIdxs =
+            fmap (\ac -> reversing $ execState ac []) . gettravIdx_ theTrav (\i -> modify (i:))
+        }
+  in theTrav
+
+dfsTravs, bfsTravs :: (Applicative f, Ord i) => Trav Identity f i e e' v v'
+dfsTravs = mkTrav (\fe fv -> Identity . idfs fe fv)
+bfsTravs = mkTrav (\fe fv -> Identity . ibfs fe fv)
+
+dfsFromTravs, bfsFromTravs :: (Applicative f, Ord i, e' ~ e, v' ~ v)
+                             => i -> Trav Identity f i e e' v v'
+dfsFromTravs i = mkTrav (\fe fv -> Identity . idfsFrom i fe fv)
+bfsFromTravs i = mkTrav (\fe fv -> Identity . ibfsFrom i fe fv)
+
+topTravs :: (Applicative f, Ord i) => Trav Maybe f i e e' v v'
+topTravs = mkTrav itop
+
+pathTravs :: (Applicative f, Ord i, e' ~ e, v' ~ v) => i -> i -> Trav Maybe f i e e' v v'
+pathTravs i1 i2 = mkTrav (ipath i1 i2)
+
+sccTravs :: (Applicative f, Ord i, e' ~ e, v' ~ v) => Trav [] f i e e' v v'
+sccTravs = mkTrav iscc
+
+idfsVert fv  = runIdentity . getitravVert dfsTravs fv
+idfsEdge fe  = runIdentity . getitravEdge dfsTravs fe
+idfs_ fe fv  = runIdentity . getitrav_ dfsTravs fe fv
+idfsVert_ fv = runIdentity . getitravVert_ dfsTravs fv
+idfsEdge_ fe = runIdentity . getitravEdge_ dfsTravs fe
+dfs fe fv    = runIdentity . gettrav dfsTravs fe fv
+dfsVert fv   = runIdentity . gettravVert dfsTravs fv
+dfsEdge fe   = runIdentity . gettravEdge dfsTravs fe
+dfs_ fe fv   = runIdentity . gettrav_ dfsTravs fe fv
+dfsVert_ fv  = runIdentity . gettravVert_ dfsTravs fv
+dfsEdge_ fe  = runIdentity . gettravEdge_ dfsTravs fe
+dfsIdx_ fi   = runIdentity . gettravIdx_ dfsTravs fi
+dfsIdxs      = runIdentity . gettravIdxs dfsTravs
+
+ibfsVert fv  = runIdentity . getitravVert bfsTravs fv
+ibfsEdge fe  = runIdentity . getitravEdge bfsTravs fe
+ibfs_ fe fv  = runIdentity . getitrav_ bfsTravs fe fv
+ibfsVert_ fv = runIdentity . getitravVert_ bfsTravs fv
+ibfsEdge_ fe = runIdentity . getitravEdge_ bfsTravs fe
+bfs fe fv    = runIdentity . gettrav bfsTravs fe fv
+bfsVert fv   = runIdentity . gettravVert bfsTravs fv
+bfsEdge fe   = runIdentity . gettravEdge dfsTravs fe
+bfs_ fe fv   = runIdentity . gettrav_ bfsTravs fe fv
+bfsVert_ fv  = runIdentity . gettravVert_ bfsTravs fv
+bfsEdge_ fe  = runIdentity . gettravEdge_ bfsTravs fe
+bfsIdx_ fi   = runIdentity . gettravIdx_ bfsTravs fi
+bfsIdxs      = runIdentity . gettravIdxs bfsTravs
+
+idfsFromVert i fv  = runIdentity . getitravVert (dfsFromTravs i) fv
+idfsFromEdge i fe  = runIdentity . getitravEdge (dfsFromTravs i) fe
+idfsFrom_ i fe fv  = runIdentity . getitrav_ (dfsFromTravs i) fe fv
+idfsFromVert_ i fv = runIdentity . getitravVert_ (dfsFromTravs i) fv
+idfsFromEdge_ i fe = runIdentity . getitravEdge_ (dfsFromTravs i) fe
+dfsFrom i fe fv    = runIdentity . gettrav (dfsFromTravs i) fe fv
+dfsFromVert i fv   = runIdentity . gettravVert (dfsFromTravs i) fv
+dfsFromEdge i fe   = runIdentity . gettravEdge (dfsFromTravs i) fe
+dfsFrom_ i fe fv   = runIdentity . gettrav_ (dfsFromTravs i) fe fv
+dfsFromVert_ i fv  = runIdentity . gettravVert_ (dfsFromTravs i) fv
+dfsFromEdge_ i fe  = runIdentity . gettravEdge_ (dfsFromTravs i) fe
+dfsFromIdx_ i fi   = runIdentity . gettravIdx_ (dfsFromTravs i) fi
+dfsFromIdxs i      = runIdentity . gettravIdxs (dfsFromTravs i)
+
+ibfsFromVert i fv  = runIdentity . getitravVert (bfsFromTravs i) fv
+ibfsFromEdge i fe  = runIdentity . getitravEdge (bfsFromTravs i) fe
+ibfsFrom_ i fe fv  = runIdentity . getitrav_ (bfsFromTravs i) fe fv
+ibfsFromVert_ i fv = runIdentity . getitravVert_ (bfsFromTravs i) fv
+ibfsFromEdge_ i fe = runIdentity . getitravEdge_ (bfsFromTravs i) fe
+bfsFrom i fe fv    = runIdentity . gettrav (bfsFromTravs i) fe fv
+bfsFromVert i fv   = runIdentity . gettravVert (bfsFromTravs i) fv
+bfsFromEdge i fe   = runIdentity . gettravEdge (bfsFromTravs i) fe
+bfsFrom_ i fe fv   = runIdentity . gettrav_ (bfsFromTravs i) fe fv
+bfsFromVert_ i fv  = runIdentity . gettravVert_ (bfsFromTravs i) fv
+bfsFromEdge_ i fe  = runIdentity . gettravEdge_ (bfsFromTravs i) fe
+bfsFromIdx_ i fi   = runIdentity . gettravIdx_ (bfsFromTravs i) fi
+bfsFromIdxs i      = runIdentity . gettravIdxs (bfsFromTravs i)
+
+itopVert  = getitravVert topTravs
+itopEdge  = getitravEdge topTravs
+itop_     = getitrav_ topTravs
+itopVert_ = getitravVert_ topTravs
+itopEdge_ = getitravEdge_ topTravs
+top       = gettrav topTravs
+topVert   = gettravVert topTravs
+topEdge   = gettravEdge dfsTravs
+top_      = gettrav_ topTravs
+topVert_  = gettravVert_ topTravs
+topEdge_  = gettravEdge_ topTravs
+topIdx_   = gettravIdx_ topTravs
+topIdxs   = gettravIdxs topTravs
+
+ipathVert  i1 i2 = getitravVert (pathTravs i1 i2)
+ipathEdge  i1 i2 = getitravEdge (pathTravs i1 i2)
+ipath_     i1 i2 = getitrav_ (pathTravs i1 i2)
+ipathVert_ i1 i2 = getitravVert_ (pathTravs i1 i2)
+ipathEdge_ i1 i2 = getitravEdge_ (pathTravs i1 i2)
+path       i1 i2 = gettrav (pathTravs i1 i2)
+pathVert   i1 i2 = gettravVert (pathTravs i1 i2)
+pathEdge   i1 i2 = gettravEdge dfsTravs
+path_      i1 i2 = gettrav_ (pathTravs i1 i2)
+pathVert_  i1 i2 = gettravVert_ (pathTravs i1 i2)
+pathEdge_  i1 i2 = gettravEdge_ (pathTravs i1 i2)
+pathIdx_   i1 i2 = gettravIdx_ (pathTravs i1 i2)
+pathIdxs   i1 i2 = gettravIdxs (pathTravs i1 i2)
+
+isccVert  = getitravVert sccTravs
+isccEdge  = getitravEdge sccTravs
+iscc_     = getitrav_ sccTravs
+isccVert_ = getitravVert_ sccTravs
+isccEdge_ = getitravEdge_ sccTravs
+scc       = gettrav sccTravs
+sccVert   = gettravVert sccTravs
+sccEdge   = gettravEdge dfsTravs
+scc_      = gettrav_ sccTravs
+sccVert_  = gettravVert_ sccTravs
+sccEdge_  = gettravEdge_ sccTravs
+sccIdx_   = gettravIdx_ sccTravs
+sccIdxs   = gettravIdxs sccTravs
