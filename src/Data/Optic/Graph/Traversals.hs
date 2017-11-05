@@ -54,16 +54,10 @@ idfsFrom, ibfsFrom :: (Applicative f, Ord i)
            -> Graph i e v -> f (Graph i e v)
 idfsFrom i fe fv g =
   let g' = travActs fe fv (dfsFrom' i) g
-  in delEdgeMerge <$> g' <*> pure g
+  in union <$> g' <*> pure g
 ibfsFrom i fe fv g =
   let g' = travActs fe fv (bfsFrom' i) g
-  in delEdgeMerge <$> g' <*> pure g
-
-delEdgeMerge :: Ord i => Graph i e v -> Graph i e v -> Graph i e v
-delEdgeMerge g' g =
-  let es = g' ^@.. iallEdges
-      g'' = foldr (\((i1, i2), _) -> delEdge i1 i2) g es
-  in g' `union` g''
+  in union <$> g' <*> pure g
 
 -- | Stateful computations which calculate the actions needed to perform a
 -- depth first/breadth first traversal of the graph.
@@ -124,7 +118,7 @@ ipath i1 i2 fe fv g = do
   m <- dijkstra' (const (1 :: Integer)) i1 g
   acs <- recAcs m i2
   let g' = actionsToGraph fe fv acs
-  return (delEdgeMerge <$> g' <*> pure g)
+  return (union <$> g' <*> pure g)
   where
     recAcs m i =
       if i == i1 then (\v -> [Vert i v]) <$> g ^. at i

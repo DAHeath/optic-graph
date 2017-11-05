@@ -15,16 +15,19 @@ module Data.Optic.Graph.TraversalVariants
   , idfs_, idfsVert_, idfsEdge_
   , dfs, dfsVert, dfsEdge
   , dfs_, dfsVert_, dfsEdge_, dfsIdx_
+  , dfsOrder
 
   , ibfsVert, ibfsEdge
   , ibfs_, ibfsVert_, ibfsEdge_
   , bfs, bfsVert, bfsEdge
   , bfs_, bfsVert_, bfsEdge_, bfsIdx_
+  , bfsOrder
 
   , itopVert, itopEdge
   , itop_, itopVert_, itopEdge_
   , top, topVert, topEdge
   , top_, topVert_, topEdge_, topIdx_
+  , topOrder
 
   , idfsFromVert, idfsFromEdge
   , idfsFrom_, idfsFromVert_, idfsFromEdge_
@@ -46,6 +49,7 @@ module Data.Optic.Graph.TraversalVariants
 
 import           Control.Lens
 import           Control.Monad (void)
+import           Control.Monad.State
 
 import qualified Data.Map as M
 
@@ -189,6 +193,10 @@ dfsIdx_, bfsIdx_ :: (Applicative f, Ord i)
 dfsIdx_ fi = void . idfsVert (\i _ -> fi i)
 bfsIdx_ fi = void . ibfsVert (\i _ -> fi i)
 
+dfsOrder, bfsOrder :: Ord i => Graph i e v -> [i]
+dfsOrder g = reversing $ execState (dfsIdx_ (\i -> modify (i:)) g) []
+bfsOrder g = reversing $ execState (bfsIdx_ (\i -> modify (i:)) g) []
+
 -- | Maybe traversal variants
 
 itopVert :: (Ord i, Applicative f)
@@ -239,6 +247,9 @@ topIdx_ :: (Applicative f, Ord i)
         => (i -> f i') -> Graph i e v -> Maybe (f ())
 topIdx_ fi g = void <$> itopVert (\i _ -> fi i) g
 
+topOrder :: Ord i => Graph i e v -> Maybe [i]
+topOrder g = reversing <$> (execState <$> topIdx_ (\i -> modify (i:)) g <*> pure [])
+
 -- | Partial traversals
 
 idfsFromVert, ibfsFromVert :: (Ord i, Applicative f)
@@ -252,19 +263,21 @@ idfsFromEdge i fe = idfsFrom i fe (const pure)
 ibfsFromEdge i fe = ibfsFrom i fe (const pure)
 
 idfsFrom_, ibfsFrom_ :: (Ord i, Applicative f)
-                     => i -> (i -> i -> e -> f e) -> (i -> v -> f v) -> Graph i e v -> f ()
-idfsFrom_ i fe fv = void . idfsFrom i fe fv
-ibfsFrom_ i fe fv = void . ibfsFrom i fe fv
+                     => i -> (i -> i -> e -> f e') -> (i -> v -> f v') -> Graph i e v -> f ()
+idfsFrom_ i fe fv = void . idfsFrom i (\i1 i2 e -> fe i1 i2 e *> pure e)
+                                      (\i v -> fv i v *> pure v)
+ibfsFrom_ i fe fv = void . ibfsFrom i (\i1 i2 e -> fe i1 i2 e *> pure e)
+                                      (\i v -> fv i v *> pure v)
 
 idfsFromVert_, ibfsFromVert_ :: (Applicative f, Ord i)
-                             => i -> (i -> v -> f v) -> Graph i e v -> f ()
-idfsFromVert_ i fv = void . idfsFromVert i fv
-ibfsFromVert_ i fv = void . ibfsFromVert i fv
+                             => i -> (i -> v -> f v') -> Graph i e v -> f ()
+idfsFromVert_ i fv = void . idfsFromVert i (\i v -> fv i v *> pure v)
+ibfsFromVert_ i fv = void . ibfsFromVert i (\i v -> fv i v *> pure v)
 
 idfsFromEdge_, ibfsFromEdge_ :: (Applicative f, Ord i)
-                             => i -> (i -> i -> e -> f e) -> Graph i e v -> f ()
-idfsFromEdge_ i fe = void . idfsFromEdge i fe
-ibfsFromEdge_ i fe = void . ibfsFromEdge i fe
+                             => i -> (i -> i -> e -> f e') -> Graph i e v -> f ()
+idfsFromEdge_ i fe = void . idfsFromEdge i (\i1 i2 e -> fe i1 i2 e *> pure e)
+ibfsFromEdge_ i fe = void . ibfsFromEdge i (\i1 i2 e -> fe i1 i2 e *> pure e)
 
 dfsFrom, bfsFrom :: (Ord i, Applicative f)
                  => i -> (e -> f e) -> (v -> f v) -> Graph i e v -> f (Graph i e v)
@@ -282,19 +295,19 @@ dfsFromEdge i fe = dfsFrom i fe pure
 bfsFromEdge i fe = bfsFrom i fe pure
 
 dfsFrom_, bfsFrom_ :: (Applicative f, Ord i)
-                   => i -> (e -> f e) -> (v -> f v) -> Graph i e v -> f ()
-dfsFrom_ i fe fv = void . dfsFrom i fe fv
-bfsFrom_ i fe fv = void . bfsFrom i fe fv
+                   => i -> (e -> f e') -> (v -> f v') -> Graph i e v -> f ()
+dfsFrom_ i fe fv = void . dfsFrom i (\e -> fe e *> pure e) (\v -> fv v *> pure v)
+bfsFrom_ i fe fv = void . bfsFrom i (\e -> fe e *> pure e) (\v -> fv v *> pure v)
 
 dfsFromVert_, bfsFromVert_ :: (Ord i, Applicative f)
-                   => i -> (v -> f v) -> Graph i e v -> f ()
-dfsFromVert_ i fv = void . dfsFromVert i fv
-bfsFromVert_ i fv = void . bfsFromVert i fv
+                   => i -> (v -> f v') -> Graph i e v -> f ()
+dfsFromVert_ i fv = void . dfsFromVert i (\v -> fv v *> pure v)
+bfsFromVert_ i fv = void . bfsFromVert i (\v -> fv v *> pure v)
 
 dfsFromEdge_, bfsFromEdge_ :: (Ord i, Applicative f)
-                           => i -> (e -> f e) -> Graph i e v -> f ()
-dfsFromEdge_ i fe = void . dfsFromEdge i fe
-bfsFromEdge_ i fe = void . bfsFromEdge i fe
+                           => i -> (e -> f e') -> Graph i e v -> f ()
+dfsFromEdge_ i fe = void . dfsFromEdge i (\e -> fe e *> pure e)
+bfsFromEdge_ i fe = void . bfsFromEdge i (\e -> fe e *> pure e)
 
 dfsFromIdx_, bfsFromIdx_ :: (Applicative f, Ord i)
                          => i -> (i -> f i') -> Graph i e v -> f ()
@@ -312,16 +325,18 @@ ipathEdge :: (Ord i, Applicative f)
 ipathEdge i1 i2 fe = ipath i1 i2 fe (const pure)
 
 ipath_ :: (Ord i, Applicative f)
-       => i -> i -> (i -> i -> e -> f e) -> (i -> v -> f v) -> Graph i e v -> Maybe (f ())
-ipath_ i1 i2 fe fv g = void <$> ipath i1 i2 fe fv g
+       => i -> i -> (i -> i -> e -> f e') -> (i -> v -> f v') -> Graph i e v -> Maybe (f ())
+ipath_ i1 i2 fe fv g = void <$> ipath i1 i2
+  (\i1 i2 e -> fe i1 i2 e *> pure e)
+  (\i v -> fv i v *> pure v) g
 
 ipathVert_ :: (Applicative f, Ord i)
-           => i -> i -> (i -> v -> f v) -> Graph i e v -> Maybe (f ())
-ipathVert_ i1 i2 fv g = void <$> ipathVert i1 i2 fv g
+           => i -> i -> (i -> v -> f v') -> Graph i e v -> Maybe (f ())
+ipathVert_ i1 i2 fv g = void <$> ipathVert i1 i2 (\i v -> fv i v *> pure v) g
 
 ipathEdge_ :: (Applicative f, Ord i)
-           => i -> i -> (i -> i -> e -> f e) -> Graph i e v -> Maybe (f ())
-ipathEdge_ i1 i2 fe g = void <$> ipathEdge i1 i2 fe g
+           => i -> i -> (i -> i -> e -> f e') -> Graph i e v -> Maybe (f ())
+ipathEdge_ i1 i2 fe g = void <$> ipathEdge i1 i2 (\i1 i2 e -> fe i1 i2 e *> pure e) g
 
 path :: (Ord i, Applicative f)
      => i -> i -> (e -> f e) -> (v -> f v) -> Graph i e v -> Maybe (f (Graph i e v))
@@ -336,16 +351,17 @@ pathEdge :: (Applicative f, Ord i)
 pathEdge i1 i2 fe = path i1 i2 fe pure
 
 path_ :: (Applicative f, Ord i)
-      => i -> i -> (e -> f e) -> (v -> f v) -> Graph i e v -> Maybe (f ())
-path_ i1 i2 fe fv g = void <$> path i1 i2 fe fv g
+      => i -> i -> (e -> f e') -> (v -> f v') -> Graph i e v -> Maybe (f ())
+path_ i1 i2 fe fv g = void <$> path i1 i2 (\e -> fe e *> pure e)
+                                          (\v -> fv v *> pure v) g
 
 pathVert_ :: (Ord i, Applicative f)
-          => i -> i -> (v -> f v) -> Graph i e v -> Maybe (f ())
-pathVert_ i1 i2 fv g = void <$> pathVert i1 i2 fv g
+          => i -> i -> (v -> f v') -> Graph i e v -> Maybe (f ())
+pathVert_ i1 i2 fv g = void <$> pathVert i1 i2 (\v -> fv v *> pure v) g
 
 pathEdge_ :: (Ord i, Applicative f)
-         => i -> i -> (e -> f e) -> Graph i e v -> Maybe (f ())
-pathEdge_ i1 i2 fe g = void <$> pathEdge i1 i2 fe g
+         => i -> i -> (e -> f e') -> Graph i e v -> Maybe (f ())
+pathEdge_ i1 i2 fe g = void <$> pathEdge i1 i2 (\e -> fe e *> pure e) g
 
 pathIdx_ :: (Applicative f, Ord i)
          => i -> i -> (i -> f i') -> Graph i e v -> Maybe (f ())
