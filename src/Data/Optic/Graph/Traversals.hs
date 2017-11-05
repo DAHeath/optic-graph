@@ -30,6 +30,18 @@ module Data.Optic.Graph.Traversals
   , bfs_, bfsVert_, bfsEdge_, bfsIdx_
   , bfsIdxs
 
+  , idfsTree
+  , idfsTreeEdge
+  , idfsTree_, idfsTreeEdge_
+  , dfsTree, dfsTreeEdge
+  , dfsTree_, dfsTreeEdge_
+
+  , ibfsTree
+  , ibfsTreeEdge
+  , ibfsTree_, ibfsTreeEdge_
+  , bfsTree, bfsTreeEdge
+  , bfsTree_, bfsTreeEdge_
+
   , itop
   , itopVert, itopEdge
   , itop_, itopVert_, itopEdge_
@@ -93,6 +105,13 @@ idfs, ibfs, ibitraverse :: (Applicative f, Ord i)
 idfs fe fv = travActs fe fv dfs'
 ibfs fe fv = travActs fe fv bfs'
 ibitraverse = idfs
+
+idfsTree, ibfsTree :: (Applicative f, Ord i)
+                   => (i -> i -> e -> f e)
+                   -> (i -> v -> f v)
+                   -> Graph i e v -> f (Graph i e v)
+idfsTree fe fv g = actionsToGraph fe fv $ treeActions $ evalState (dfs' g) S.empty
+ibfsTree fe fv g = actionsToGraph fe fv $ treeActions $ evalState (bfs' g) S.empty
 
 -- | Topological indexed bitraversal of the graph. If the graph contains cycles,
 -- returns Nothing.
@@ -166,6 +185,11 @@ bfsFrom' start g = evalStateT ((++) <$> visit start <*> loop) Seq.empty
         lift (contains i .= True)
         modify (Seq.|> i)
         return $ Vert i v
+
+treeActions :: Eq i => [Action i e v] -> [Action i e v]
+treeActions (Edge{} : Edge i1 i2 e : acs) = treeActions (Edge i1 i2 e : acs)
+treeActions (ac : acs) = ac : treeActions acs
+treeActions [] = []
 
 -- | Indexed bitraversal of a path between the two given indices (if one exists).
 ipath :: (Applicative f, Ord i) => i -> i
@@ -430,6 +454,12 @@ dfsTravs, bfsTravs :: (Applicative f, Ord i) => Trav Identity f i e e' v v'
 dfsTravs = mkTrav (\fe fv -> Identity . idfs fe fv)
 bfsTravs = mkTrav (\fe fv -> Identity . ibfs fe fv)
 
+dfsTreeTravs, bfsTreeTravs :: (Applicative f, Ord i, e' ~ e, v' ~ v)
+                           => Trav Identity f i e e' v v'
+dfsTreeTravs = mkTrav (\fe fv -> Identity . idfsTree fe fv)
+bfsTreeTravs = mkTrav (\fe fv -> Identity . ibfsTree fe fv)
+
+
 dfsFromTravs, bfsFromTravs :: (Applicative f, Ord i, e' ~ e, v' ~ v)
                              => i -> Trav Identity f i e e' v v'
 dfsFromTravs i = mkTrav (\fe fv -> Identity . idfsFrom i fe fv)
@@ -471,6 +501,22 @@ bfsVert_ fv  = runIdentity . gettravVert_ bfsTravs fv
 bfsEdge_ fe  = runIdentity . gettravEdge_ bfsTravs fe
 bfsIdx_ fi   = runIdentity . gettravIdx_ bfsTravs fi
 bfsIdxs      = runIdentity . gettravIdxs bfsTravs
+
+idfsTreeEdge fe  = runIdentity . getitravEdge dfsTreeTravs fe
+idfsTree_ fe fv  = runIdentity . getitrav_ dfsTreeTravs fe fv
+idfsTreeEdge_ fe = runIdentity . getitravEdge_ dfsTreeTravs fe
+dfsTree fe fv    = runIdentity . gettrav dfsTreeTravs fe fv
+dfsTreeEdge fe   = runIdentity . gettravEdge dfsTreeTravs fe
+dfsTree_ fe fv   = runIdentity . gettrav_ dfsTreeTravs fe fv
+dfsTreeEdge_ fe  = runIdentity . gettravEdge_ dfsTreeTravs fe
+
+ibfsTreeEdge fe  = runIdentity . getitravEdge bfsTreeTravs fe
+ibfsTree_ fe fv  = runIdentity . getitrav_ bfsTreeTravs fe fv
+ibfsTreeEdge_ fe = runIdentity . getitravEdge_ bfsTreeTravs fe
+bfsTree fe fv    = runIdentity . gettrav bfsTreeTravs fe fv
+bfsTreeEdge fe   = runIdentity . gettravEdge dfsTreeTravs fe
+bfsTree_ fe fv   = runIdentity . gettrav_ bfsTreeTravs fe fv
+bfsTreeEdge_ fe  = runIdentity . gettravEdge_ bfsTreeTravs fe
 
 idfsFromVert i fv  = runIdentity . getitravVert (dfsFromTravs i) fv
 idfsFromEdge i fe  = runIdentity . getitravEdge (dfsFromTravs i) fe

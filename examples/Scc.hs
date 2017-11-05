@@ -1,13 +1,14 @@
 import Data.Optic.Graph
 
-example :: Graph Int () Int
+example :: Graph Int Int Int
 example = fromLists
   (zip [0..4] [0..4])
-  [ (0, 3, ())
-  , (0, 2, ())
-  , (1, 0, ())
-  , (2, 1, ())
-  , (3, 4, ())
+  [ (0, 3, 5)
+  , (0, 2, 6)
+  , (1, 0, 7)
+  , (2, 1, 8)
+  , (3, 4, 9)
+  , (0, 0, 10)
   ]
 
 test :: IO ()
