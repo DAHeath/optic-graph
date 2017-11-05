@@ -19,8 +19,6 @@ module Data.Optic.Graph
   , module Data.Optic.Graph.EdgeFocused
   , module Data.Optic.Graph.Ctxt
   , module Data.Optic.Graph.Traversals
-  , module Data.Optic.Graph.TraversalVariants
-  , module Data.Optic.Graph.Scc
   ) where
 
 import Data.Optic.Graph.Graph
@@ -28,5 +26,3 @@ import Data.Optic.Graph.Accessors
 import Data.Optic.Graph.EdgeFocused
 import Data.Optic.Graph.Ctxt
 import Data.Optic.Graph.Traversals
-import Data.Optic.Graph.TraversalVariants
-import Data.Optic.Graph.Scc

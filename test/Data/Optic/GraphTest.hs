@@ -70,7 +70,7 @@ prop_addEdgeSize k1 k2 e g =
   || elemEdge k1 k2 g
 
 prop_decomp :: IGraph -> Bool
-prop_decomp g = case match' g of
+prop_decomp g = case matchAny g of
   Nothing -> null g
   Just d -> fromDecomp d == g
 
