@@ -27,6 +27,7 @@ library
                      , containers
                      , mtl
                      , monad-loops
+                     , comonad
                      , lens
                      , bifunctors
                      , QuickCheck

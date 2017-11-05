@@ -14,7 +14,9 @@ module Data.Optic.Graph.Graph
   , edge, edgesTo, edgesFrom, allEdges
   , iedgesTo, iedgesFrom, iallEdges
   , idxs, idxSet
-  , empty, fromLists, union, unionWith
+  , empty
+  , fromLists, fromListsWith
+  , union, unionWith
   , addVert, addVertWith
   , addEdge, addEdgeWith
   , delVert
