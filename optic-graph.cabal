@@ -21,6 +21,7 @@ library
                      , Data.Optic.Graph.Ctxt
                      , Data.Optic.Graph.Traversals
                      , Data.Optic.Graph.Internal.Actions
+                     , Data.Optic.Directed.Abstract
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl

@@ -6,7 +6,6 @@ module Data.Optic.Graph.Traversals
 
   , mapVert, imapVert
   , mapEdge, imapEdge
-  , mapIdx
 
   , foldVert, ifoldVert
   , foldEdge, ifoldEdge
@@ -14,7 +13,6 @@ module Data.Optic.Graph.Traversals
 
   , travVert, itravVert
   , travEdge, itravEdge
-  , travIdx
 
   , idfs
   , idfsVert, idfsEdge
@@ -313,22 +311,13 @@ imapVert :: (i -> v -> v') -> Graph i e v -> Graph i e v'
 imapVert = imap
 
 -- | Apply the given function to all edges.
-mapEdge :: (e -> e') -> Graph i e v -> Graph i e' v
+mapEdge :: Ord i => (e -> e') -> Graph i e v -> Graph i e' v
 mapEdge = under (from edgeFocused) . fmap
 
 -- | Apply the given function to all edges, taking each edge's indices as
 -- additional arguments.
-imapEdge :: (i -> i -> e -> e') -> Graph i e v -> Graph i e' v
+imapEdge :: Ord i => (i -> i -> e -> e') -> Graph i e v -> Graph i e' v
 imapEdge = under (from edgeFocused) . imap . uncurry
-
--- | The map obtained by applying f to each index of s.
--- The size of the result may be smaller if f maps two or more distinct indices to
--- the same new index. In this case the value at the greatest of the original indices
--- is retained.
-mapIdx :: Ord i' => (i -> i') -> Graph i e v -> Graph i' e v
-mapIdx f (Graph vs es) =
-  Graph (M.mapKeys f vs)
-        (M.mapKeys f $ fmap (M.mapKeys f) es)
 
 -- | Aggregate the vertices.
 foldVert :: (v -> b -> b) -> b -> Graph i e v -> b
@@ -343,7 +332,7 @@ foldEdge :: (e -> b -> b) -> b -> Graph i e v -> b
 foldEdge f acc g = foldr f acc (EdgeFocused g)
 
 -- | Aggregate the edges with the edge indices as additional arguments.
-ifoldEdge :: (i -> i -> e -> b -> b) -> b -> Graph i e v -> b
+ifoldEdge :: Ord i => (i -> i -> e -> b -> b) -> b -> Graph i e v -> b
 ifoldEdge f acc g = ifoldr (uncurry f) acc (EdgeFocused g)
 
 -- | Aggregate the indices.
@@ -363,20 +352,9 @@ travEdge :: Applicative f => (e -> f e') -> Graph i e v -> f (Graph i e' v)
 travEdge = allEdges
 
 -- | Indexed edge traversal.
-itravEdge :: Applicative f => (i -> i -> e -> f e') -> Graph i e v -> f (Graph i e' v)
+itravEdge :: (Ord i, Applicative f)
+          => (i -> i -> e -> f e') -> Graph i e v -> f (Graph i e' v)
 itravEdge f g = getEdgeFocused <$> itraverse (uncurry f) (EdgeFocused g)
-
--- | Traverse the indices.
--- The size of the result may be smaller if f maps two or more distinct indices to
--- the same new index. In this case the value at the greatest of the original indices
--- is retained.
-travIdx :: (Applicative f, Ord i, Ord i') => (i -> f i') -> Graph i e v -> f (Graph i' e v)
-travIdx f g =
-  replace (idxs g) <$> traverse f (idxs g)
-  where
-    replace is is' =
-      let m = M.fromList (zip is is')
-      in mapIdx (\i -> m M.! i) g
 
 data Trav g f i e e' v v' = Trav
   { getitrav :: (i -> i -> e -> f e')

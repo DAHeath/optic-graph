@@ -27,21 +27,22 @@ edgeFocused :: Iso (Graph i e v) (Graph i' e' v')
                    (EdgeFocused i v e) (EdgeFocused i' v' e')
 edgeFocused = iso EdgeFocused getEdgeFocused
 
-instance Functor (EdgeFocused i v) where
+instance Ord i => Functor (EdgeFocused i v) where
   fmap = over (from edgeFocused . edgeMap) . fmap . fmap
 
 instance Foldable (EdgeFocused i v) where
   foldr = foldrOf (from edgeFocused . allEdges)
 
-instance Traversable (EdgeFocused i v) where
+instance Ord i => Traversable (EdgeFocused i v) where
   traverse = traverseOf (from edgeFocused . allEdges)
 
-instance (i ~ i', v ~ v') => Each (EdgeFocused i v e) (EdgeFocused i' v' e') e e' where
+instance (Ord i, i ~ i', v ~ v')
+  => Each (EdgeFocused i v e) (EdgeFocused i' v' e') e e' where
   each = traversed
 
-instance FunctorWithIndex (i, i) (EdgeFocused i v)
-instance FoldableWithIndex (i, i) (EdgeFocused i v)
-instance TraversableWithIndex (i, i) (EdgeFocused i v) where
+instance Ord i => FunctorWithIndex (i, i) (EdgeFocused i v)
+instance Ord i => FoldableWithIndex (i, i) (EdgeFocused i v)
+instance Ord i => TraversableWithIndex (i, i) (EdgeFocused i v) where
   itraverse = itraverseOf (from edgeFocused . edgeMap . itraverse . mapT)
     where
       mapT :: Applicative f => Indexed (i, i) e (f e') -> i -> Map i e -> f (Map i e')
