@@ -316,11 +316,11 @@ connections g = map (first (omap (\i -> (i, g ^?! ix i)))) (g ^@.. iallEdges)
 
 descendants :: (Ord i, Ord (f i), Foldable f, Directed f)
             => i -> Graph f i e v -> Set i
-descendants i g = S.unions $ map (end.fst) $ reached i g ^@.. iallEdges
+descendants i g = idxSet $ strictReached i g
 
 ancestors :: (Ord i, Ord (f i), Foldable f, Directed f)
           => i -> Graph f i e v -> Set i
-ancestors i g = S.unions $ map (start.fst) $ reaches i g ^@.. iallEdges
+ancestors i g = idxSet $ strictReaches i g
 
 instance (Ord i, Ord (f i)) => Monoid (Graph f i e v) where
   mempty = empty
@@ -431,12 +431,14 @@ idfsFrom, ibfsFrom, irevBfsFrom
 idfsFrom i fe fv g =
   let g' = travActs fe fv (dfsFrom' i) g
   in union <$> g' <*> pure g
-ibfsFrom i fe fv g =
-  let g' = travActs fe fv (bfsFrom' i) g
-  in union <$> g' <*> pure g
-irevBfsFrom i fe fv g =
-  let g' = travActs fe fv (revBfsFrom' i) g
-  in union <$> g' <*> pure g
+ibfsFrom = undefined
+irevBfsFrom = undefined
+-- ibfsFrom i fe fv g =
+--   let g' = travActs fe fv (bfsFrom' i) g
+--   in union <$> g' <*> pure g
+-- irevBfsFrom i fe fv g =
+--   let g' = travActs fe fv (revBfsFrom' i) g
+--   in union <$> g' <*> pure g
 
 itop :: (Directed f, Foldable f, Applicative g, Ord i, Ord (f i))
      => (f i -> e -> g e')
@@ -444,16 +446,19 @@ itop :: (Directed f, Foldable f, Applicative g, Ord i, Ord (f i))
      -> Graph f i e v -> Maybe (g (Graph f i e' v'))
 itop fe fv g = actionsToGraph fe fv <$> evalStateT top' (S.empty, g)
 
-dfs', bfs', revBfs' :: (Foldable f, Directed f, Ord i)
-                    => Graph f i e v -> State (Set i) [Action f i e v]
+dfs', bfs', revBfs' :: (Foldable f, Directed f, Ord i, Ord (f i))
+                    => State (Set i, Graph f i e v) [Action f i e v]
 dfs' = promoteFrom dfsFrom'
 bfs' = promoteFrom bfsFrom'
 revBfs' = promoteFrom revBfsFrom'
 
-reached, reaches :: (Directed f, Foldable f, Ord i, Ord (f i))
-                 => i -> Graph f i e v -> Graph f i e v
-reached i = runIdentity . travActs (\_ e -> Identity e) (\_ v -> Identity v) (bfsFrom' i)
+reached, reaches, strictReached, strictReaches
+  :: (Directed f, Foldable f, Ord i, Ord (f i))
+  => i -> Graph f i e v -> Graph f i e v
+reached i = runIdentity . travActs (\_ e -> Identity e) (\_ v -> Identity v) (dfsFrom' i)
 reaches i = runIdentity . travActs (\_ e -> Identity e) (\_ v -> Identity v) (revBfsFrom' i)
+strictReached i = runIdentity . travActs (\_ e -> Identity e) (\_ v -> Identity v) (tail <$> dfsFrom' i)
+strictReaches i = runIdentity . travActs (\_ e -> Identity e) (\_ v -> Identity v) (tail <$> revBfsFrom' i)
 
 between :: (Directed f, Foldable f, Ord (f i), Ord i)
         => i -> i -> Graph f i e v -> Graph f i e v
@@ -482,41 +487,86 @@ ipath i1 i2 fe fv g = do
         return (Vert i v : Edge fi e : acs)
 
 dfsFrom', bfsFrom', revBfsFrom'
-  :: (Foldable f, Directed f, Ord i)
-  => i -> Graph f i e v -> State (Set i) [Action f i e v]
-dfsFrom' i g = do
-  b <- contains i <<.= True
-  fmap fold $ forM (guard (not b) >> g ^? ix i) $ \v ->
-    fmap ((Vert i v:) . concat) $ forM (g ^@.. iedgesFrom i) $ \(i', e) ->
-      (Edge i' e:) <$> (concat <$> traverse (`dfsFrom'` g) (S.toList $ end i'))
-
-bfsFrom' start g = evalStateT ((++) <$> visit start <*> loop) Seq.empty
+  :: (Foldable f, Directed f, Ord i, Ord (f i))
+  => i -> State (Set i, Graph f i e v) [Action f i e v]
+dfsFrom' i = do
+  b <- elem i <$> use _1
+  g <- use _2
+  if b then return []
+  else do
+    _1 %= S.insert i
+    case g ^? ix i of
+      Nothing -> return []
+      Just v -> (Vert i v :) <$> loop i
   where
-    loop =
+    loop i = do
+      g <- use _2
+      case g ^@.. iedgesFrom i of
+        [] -> return []
+        ((i', e):_) -> do
+          _2 %= delEdge i'
+          l <- (Edge i' e:) <$> (concat <$> traverse dfsFrom' (S.toList $ end i'))
+          rest <- loop i
+          return (l ++ rest)
+
+bfsFrom' start = evalStateT (do
+  s <- visit start
+  l <- loop
+  return (s ++ l)) Seq.empty
+  where
+    loop = do
+      g <- lift (use _2)
       fmap fold $ whileM (gets $ not . null) $ do
         i <- state (\(Seq.viewl -> h Seq.:< t) -> (h, t))
-        fmap fold $ forM (g ^@.. iedgesFrom i) $ \(i', e) ->
-          (Edge i' e:) <$> (concat <$> traverse visit (S.toList $ end i'))
+        loopOut i
+
+    loopOut i = do
+      g <- lift (use _2)
+      case g ^@.. iedgesFrom i of
+        [] -> return []
+        ((i', e):_) -> do
+          lift (_2 %= delEdge i')
+          l <- (Edge i' e:) <$> (concat <$> traverse visit (S.toList $ end i'))
+          rest <- loopOut i
+          return (l ++ rest)
+
     visit i = do
-      b <- lift (use $ contains i)
+      g <- lift (use _2)
+      b <- lift (zoom _1 (use $ contains i))
       fmap maybeToList $ forM (guard (not b) >> g ^? ix i) $ \v -> do
-        lift (contains i .= True)
+        lift (zoom _1 (contains i .= True))
         modify (Seq.|> i)
         return $ Vert i v
 
-revBfsFrom' end g = evalStateT ((++) <$> visit end <*> loop) Seq.empty
+revBfsFrom' end = evalStateT (do
+  s <- visit end
+  l <- loop
+  return (s ++ l)) Seq.empty
   where
-    loop =
+    loop = do
+      g <- lift (use _2)
       fmap fold $ whileM (gets $ not . null) $ do
         i <- state (\(Seq.viewl -> h Seq.:< t) -> (h, t))
-        fmap fold $ forM (g ^@.. iedgesTo i) $ \(i', e) ->
-          (Edge i' e:) <$> (concat <$> traverse visit (S.toList $ start i'))
+        loopOut i
+
+    loopOut i = do
+      g <- lift (use _2)
+      case g ^@.. iedgesTo i of
+        [] -> return []
+        ((i', e):_) -> do
+          lift (_2 %= delEdge i')
+          l <- (Edge i' e:) <$> (concat <$> traverse visit (S.toList $ start i'))
+          rest <- loopOut i
+          return (l ++ rest)
+
     visit i = do
-      b <- lift (use $ contains i)
+      g <- lift (use _2)
+      b <- lift (zoom _1 (use $ contains i))
       fmap maybeToList $ forM (guard (not b) >> g ^? ix i) $ \v -> do
-        lift (contains i .= True)
+        lift (zoom _1 (contains i .= True))
         modify (Seq.|> i)
         return $ Vert i v
+
 
 top' :: (Ord i, Ord (f i), Directed f)
      => StateT (Set i, Graph f i e v) Maybe [Action f i e v]
@@ -590,22 +640,30 @@ bellmanFord' weight i g = fmap fst $ (`execStateT` (M.empty, M.empty)) $ do
     actsTo = _1
     dists = _2
 
-promoteFrom :: Ord i
-            => (i -> Graph f i e v -> State (Set i) [Action f i e v])
-            -> Graph f i e v -> State (Set i) [Action f i e v]
-promoteFrom fr g = do
-  s <- gets $ S.difference $ idxSet g
+promoteFrom :: (Ord i, Directed f)
+            => (i -> State (Set i, Graph f i e v) [Action f i e v])
+            -> State (Set i, Graph f i e v) [Action f i e v]
+promoteFrom fr = do
+  g <- use _2
+  s <- uses _1 $ S.difference $ idxSet g
   if null s
-  then return []
-  else (++) <$> fr (S.findMin s) g <*> promoteFrom fr g
+  then zoom _2 complete
+  else (++) <$> fr (S.findMin s) <*> promoteFrom fr
+
+complete :: (MonadState (Graph f i e v) m, Directed f, Ord i)
+         => m [Action f i e v]
+complete = do
+  g <- get
+  let es = g ^@.. iallEdges
+  return $ map (uncurry Edge) es
 
 -- | Promote a stateful generator of graph actions to a indexed bitraversal.
 travActs :: (Ord i, Applicative g, Foldable f, Ord (f i))
          => (f i -> e -> g e')
          -> (i -> v -> g v')
-         -> (Graph f i e v -> State (Set i) [Action f i e v])
+         -> State (Set i, Graph f i e v) [Action f i e v]
          -> Graph f i e v -> g (Graph f i e' v')
-travActs fe fv trav g = actionsToGraph fe fv $ evalState (trav g) S.empty
+travActs fe fv trav g = actionsToGraph fe fv $ evalState trav (S.empty, g)
 
 -- | Convert a list of actions to a graph using the given applicative functions.
 actionsToGraph :: (Ord i, Applicative g, Foldable f, Ord (f i))
@@ -672,9 +730,11 @@ travEdge :: Applicative g => (e -> g e') -> Graph f i e v -> g (Graph f i e' v)
 travEdge = allEdges
 
 -- | Indexed edge traversal.
-itravEdge :: (Ord i, Applicative g)
-          => (f i -> e -> g e') -> Graph f i e v -> g (Graph f i e' v)
+itravEdge :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g (Graph f i e' v)
 itravEdge f g = getEdgeFocused <$> itraverse f (EdgeFocused g)
+
+itravEdge_ :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g ()
+itravEdge_ f = void . itravEdge f
 
 data Trav g f t i e e' v v' = Trav
   { getitrav :: (t i -> e -> f e')

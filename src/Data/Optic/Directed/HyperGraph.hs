@@ -13,6 +13,7 @@ import qualified Data.Set as S
 import qualified Data.Optic.Internal.Graph as I
 import           Data.Optic.Internal.Graph hiding (Graph)
 
+import           Test.QuickCheck.Arbitrary
 import qualified Test.QuickCheck.Gen as G
 
 data HEdge a = HEdge (Set a) a
@@ -30,5 +31,8 @@ instance ArbFrom HEdge where
     i1 <- arbFrom ks
     i2 <- G.elements ks
     return (HEdge i1 i2)
+
+instance (Arbitrary a, Ord a) => Arbitrary (HEdge a) where
+  arbitrary = HEdge <$> arbitrary <*> arbitrary
 
 type Graph i e v = I.Graph HEdge i e v
