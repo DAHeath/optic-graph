@@ -127,6 +127,8 @@ data Graph f i e v = Graph
   } deriving (Show, Read, Eq, Ord, Data)
 makeLenses ''Graph
 
+-- | To simplify the implementation of traversals, we record the order in which
+-- the graph short be modified.
 data Action f i e v
   = Vert i v
   | Edge (f i) e
@@ -137,15 +139,21 @@ class Directed f where
   start :: Ord a => f a -> Set a
   end :: Ord a => f a -> Set a
 
+-- | Indexed traversal of the edges that come from a different index, labelled with
+-- the edge index.
 iedgesTo :: (Directed f, Ord i) => i -> IndexedTraversal' (f i) (Graph f i e v) e
 iedgesTo e = edgeMap . itraversed . indices (\i -> e `elem` end i)
 
+-- | A traversal which selects all edges that reach the given index.
 edgesTo :: (Directed f, Ord i) => i -> Traversal' (Graph f i e v) e
 edgesTo = iedgesTo
 
+-- | Indexed traversal of the edges from the given index, labelled with the
+-- edge index.
 iedgesFrom :: (Directed f, Ord i) => i -> IndexedTraversal' (f i) (Graph f i e v) e
 iedgesFrom s = edgeMap . itraversed . indices (\i -> s `elem` start i)
 
+-- | A traversal which selects all edges that originate at an index.
 edgesFrom :: (Directed f, Ord i) => i -> Traversal' (Graph f i e v) e
 edgesFrom = iedgesFrom
 
@@ -155,6 +163,7 @@ successors g s = S.unions $ map (end . fst) $ g ^@.. iedgesFrom s
 predecessors :: (Directed f, Ord i) => Graph f i e v -> i -> Set i
 predecessors g e = S.unions $ map (start . fst) $ g ^@.. iedgesTo e
 
+-- | Reverse the direction of all edges in the graph.
 reverse :: (Foldable f, Reversing (f i), Ord i, Ord (f i)) => Graph f i e v -> Graph f i e v
 reverse g = foldr (\(i, e) -> addEdge (reversing i) e) onlyVerts (g ^@.. iallEdges)
   where
@@ -172,45 +181,62 @@ elemVert i g = not $ null (g ^? vertMap . ix i)
 elemEdge :: (Ord i, Ord (f i)) => f i -> Graph f i e v -> Bool
 elemEdge i g = not $ null (g ^? edgeMap . ix i)
 
+-- | A traversal which selects all vertices in the graph.
 allVerts :: Traversal (Graph f i e v) (Graph f i e v') v v'
 allVerts = iallVerts
 
+-- | Indexed traversal of all vertices.
 iallVerts :: IndexedTraversal i (Graph f i e v) (Graph f i e v') v v'
 iallVerts = vertMap . itraverse . indexed
 
+-- | A traversal which selects the edge at the index.
 edge :: Ord (f i) => f i -> Traversal' (Graph f i e v) e
 edge i = edgeMap . ix i
 
+-- | A traversal which selects all edges in the graph.
 allEdges :: Traversal (Graph f i e v) (Graph f i e' v) e e'
 allEdges = iallEdges
 
+-- | Indexed traversal of all edges in the graph.
 iallEdges :: IndexedTraversal (f i) (Graph f i e v) (Graph f i e' v) e e'
 iallEdges = edgeMap . itraverse . indexed
 
+-- | Indices of the graph in ascending order.
 idxs :: Graph f i e v -> [i]
 idxs = views vertMap M.keys
 
+-- | The set of all indices in the graph.
 idxSet :: Graph f i e v -> Set i
 idxSet = views vertMap M.keysSet
 
+-- | A graph with no vertices and no edges.
 empty :: Graph f i e v
 empty = Graph M.empty M.empty
 
+-- | Build a graph from a list of labelled vertices and labelled edges, combining
+-- vertices and edges at matching indices using the provided functions.
 fromListsWith :: (Foldable f, Ord i, Ord (f i))
               => (e -> e -> e) -> (v -> v -> v)
               -> [(i, v)] -> [(f i, e)] -> Graph f i e v
 fromListsWith fe fv vs =
   foldr (uncurry (addEdgeWith fe)) (foldr (uncurry (addVertWith fv)) empty vs)
 
+-- | Build a graph from a list of labelled vertices and labelled edges.
 fromLists :: (Foldable f, Ord i, Ord (f i)) => [(i, v)] -> [(f i, e)] -> Graph f i e v
 fromLists = fromListsWith const const
 
+-- | Add a vertex at the index, or combine the new vertex label with the existing
+-- one using the provided function.
 addVertWith :: Ord i => (v -> v -> v) -> i -> v -> Graph f i e v -> Graph f i e v
 addVertWith fv i v = vertMap %~ M.insertWith fv i v
 
+-- | Add a vertex at the index, or replace the vertex at that index.
 addVert :: Ord i => i -> v -> Graph f i e v -> Graph f i e v
 addVert = addVertWith const
 
+-- | Add an edge between two indices in the graph if both indices have
+-- vertices. If they do not, the graph is unchanged.  If there is already an
+-- edge between the two indices, combine the two using the provided function.
 addEdgeWith :: (Foldable f, Ord i, Ord (f i))
             => (e -> e -> e) -> f i -> e -> Graph f i e v -> Graph f i e v
 addEdgeWith fe i e g = g &
@@ -218,44 +244,65 @@ addEdgeWith fe i e g = g &
     then edgeMap %~ M.insertWith fe i e
     else id
 
+-- | Add an edge between two indices in the graph if both indices have
+-- vertices. If they do not, the graph is unchanged.  If there is already an
+-- edge between the two indices, replace it with the new edge.
 addEdge :: (Foldable f, Ord i, Ord (f i))
         => f i -> e -> Graph f i e v -> Graph f i e v
 addEdge = addEdgeWith const
 
+-- | Combine two graphs. If both graphs have a vertex at the same index, use
+-- the provided function to decide how to generate the new vertex at the index.
 unionWith :: (Ord i, Ord (f i)) => (e -> e -> e) -> (v -> v -> v)
           -> Graph f i e v -> Graph f i e v -> Graph f i e v
 unionWith fe fv (Graph v1 f1) (Graph v2 f2) =
     Graph (M.unionWith fv v1 v2)
           (M.unionWith fe f1 f2)
 
+-- | Combine two graphs (left biased). If both graph have a vertex/edge at the
+-- same index, use the vertex label from the first graph.
 union :: (Ord i, Ord (f i)) => Graph f i e v -> Graph f i e v -> Graph f i e v
 union = unionWith const const
 
+-- | Remove an index from the graph, deleting the corresponding vertices and
+-- edges to and from the index.
 delIdx :: (Foldable f, Ord i) => i -> Graph f i e v -> Graph f i e v
 delIdx i g = g & vertMap %~ M.delete i
                & edgeMap %~ M.filterWithKey (\i' _ -> i `notElem` i')
 
+-- | Remove the edge occurring at the given index.
 delEdge :: Ord (f i) => f i -> Graph f i e v -> Graph f i e v
 delEdge = delEdgeBy (const True)
 
+-- | Delete the edge at the index if it satisfies the predicate.
 delEdgeBy :: Ord (f i) => (e -> Bool) -> f i -> Graph f i e v -> Graph f i e v
 delEdgeBy p i = edgeMap . at i %~ mfilter (not . p)
 
+-- | Delete all vertices that are equal to the given value.  If a vertex is
+-- removed, its index and all corresponding edges are also removed.
 delVert :: (Foldable f, Eq v, Ord i) => v -> Graph f i e v -> Graph f i e v
 delVert v = filterVerts (not . (==) v)
 
+-- | Filter the vertices in the graph by the given predicate which also takes
+-- the vertex index as an argument.  If a vertex is removed, its index and all
+-- corresponding edges are also removed.
 ifilterVerts :: (Foldable f, Ord i) => (i -> v -> Bool) -> Graph f i e v -> Graph f i e v
 ifilterVerts p g =
   let meetsP = g & vertMap %~ M.filterWithKey p
   in foldr delIdx meetsP (idxSet g `S.difference` idxSet meetsP)
 
+-- | Filter the vertices in the graph by the given predicate.  If a vertex is
+-- removed, its index and all corresponding edges are also removed.
 filterVerts :: (Foldable f, Ord i) => (v -> Bool) -> Graph f i e v -> Graph f i e v
 filterVerts p = ifilterVerts (const p)
 
+-- | Filter the edges in the graph by the given predicate which also takes the
+-- edge indices as additional arguments.
 ifilterEdges :: Ord (f i) => (f i -> e -> Bool) -> Graph f i e v -> Graph f i e v
 ifilterEdges p g =
     foldr (\(i, _) -> delEdgeBy (not . p i) i) g (g ^@.. iallEdges)
 
+-- | Filter the edges in the graph by the given predicate.
 filterEdges :: Ord (f i) => (e -> Bool) -> Graph f i e v -> Graph f i e v
 filterEdges p = ifilterEdges (const p)
 
@@ -268,12 +315,16 @@ class OrdFunctor f where
 instance OrdFunctor Set where
   omap = S.map
 
+-- | The graph created by the (left biased) cartesian product of the two input
+-- graphs.
 cartesianProduct :: (OrdFunctor f, Foldable f, Ord (f i3), Ord i3)
                  => (i1 -> i2 -> i3)
                  -> (v1 -> v2 -> v3)
                  -> Graph f i1 e v1 -> Graph f i2 e v2 -> Graph f i3 e v3
 cartesianProduct = cartesianProductWith const const
 
+-- | The graph created by the cartesian product of the two input graphs.
+-- Combine coincident edges and vertices using the provided functions.
 cartesianProductWith :: (OrdFunctor f, Foldable f, Ord (f i3), Ord i3)
                      => (e -> e -> e)
                      -> (v3 -> v3 -> v3)
