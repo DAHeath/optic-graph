@@ -1,6 +1,6 @@
 name:                optic-graph
 version:             0.1.0.0
-homepage:            https://github.com/DAHeath/ord-graph
+homepage:            https://github.com/DAHeath/optic-graph
 license:             BSD3
 license-file:        LICENSE
 author:              David Heath
@@ -13,31 +13,24 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  ghc-options:         -Wall
-  exposed-modules:     Data.Optic.Graph
-  other-modules:       Data.Optic.Graph.Graph
-                     , Data.Optic.Graph.Accessors
-                     , Data.Optic.Graph.EdgeFocused
-                     , Data.Optic.Graph.Ctxt
-                     , Data.Optic.Graph.Traversals
-                     , Data.Optic.Graph.Internal.Actions
-                     , Data.Optic.Directed.Abstract
+  exposed-modules:     Data.Optic.Directed.Graph
+                     , Data.Optic.Directed.HyperGraph
+                     , Data.Optic.Undirected.Graph
+                     , Data.Optic.Undirected.HyperGraph
   build-depends:       base >= 4.7 && < 5
+                     , lens
                      , containers
                      , mtl
-                     , monad-loops
-                     , comonad
-                     , lens
                      , bifunctors
-                     , QuickCheck
+                     , monad-loops
   default-language:    Haskell2010
 
-test-suite ord-graph-test
+test-suite optic-graph2-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
-  main-is:             Data/Optic/GraphTest.hs
+  main-is:             Spec.hs
   build-depends:       base
-                     , optic-graph
+                     , optic-graph2
                      , hspec
                      , QuickCheck
                      , lens
