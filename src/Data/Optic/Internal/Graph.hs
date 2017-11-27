@@ -484,14 +484,12 @@ idfsFrom, ibfsFrom, irevBfsFrom
 idfsFrom i fe fv g =
   let g' = travActs fe fv (dfsFrom' i) g
   in union <$> g' <*> pure g
-ibfsFrom = undefined
-irevBfsFrom = undefined
--- ibfsFrom i fe fv g =
---   let g' = travActs fe fv (bfsFrom' i) g
---   in union <$> g' <*> pure g
--- irevBfsFrom i fe fv g =
---   let g' = travActs fe fv (revBfsFrom' i) g
---   in union <$> g' <*> pure g
+ibfsFrom i fe fv g =
+  let g' = travActs fe fv (bfsFrom' i) g
+  in union <$> g' <*> pure g
+irevBfsFrom i fe fv g =
+  let g' = travActs fe fv (revBfsFrom' i) g
+  in union <$> g' <*> pure g
 
 itop :: (Directed f, Foldable f, Applicative g, Ord i, Ord (f i))
      => (f i -> e -> g e')
@@ -624,6 +622,12 @@ revBfsFrom' end = evalStateT (do
 top' :: (Ord i, Ord (f i), Directed f)
      => StateT (Set i, Graph f i e v) Maybe [Action f i e v]
 top' = do
+  g <- use theGraph
+  labels <- concat <$> traverse (\(i, e) ->
+    if null (start i)
+    then do theGraph %= delEdge i
+            return [Edge i e]
+    else return []) (g ^@.. iallEdges)
   theSet <~ uses theGraph noIncoming
   acs <- fmap concat $ whileM (uses theSet $ not . null) $ do
     i <- zoom theSet $ state S.deleteFindMin
@@ -634,7 +638,7 @@ top' = do
       when (all (\i'' -> hasn't (edgesTo i'') g') (end i')) (theSet %= S.union (end i'))
       return $ Edge i' e)
   guard =<< uses theGraph (nullOf allEdges)
-  return acs
+  return (labels ++ acs)
   where
     hasIncoming g = S.unions $ map (end . fst) $ g ^@.. iallEdges
     noIncoming g = idxSet g `S.difference` hasIncoming g

@@ -57,11 +57,12 @@ prop_top g = case top pure pure g of
     Just tr -> g == runIdentity tr
 
 prop_topMeansDag :: IGraph -> Bool
-prop_topMeansDag g = case top pure pure g of
-  Nothing -> True
-  Just tr ->
-    let g' = runIdentity tr
-    in all (\i -> i `notElem` descendants i g') (idxs g')
+prop_topMeansDag g =
+  case top pure pure (withoutBackEdges g) of
+    Nothing -> False
+    Just tr ->
+      let g' = runIdentity tr
+      in g' == withoutBackEdges g
 
 prop_travPure :: Traversal IGraph IGraph Int Int -> IGraph -> Bool
 prop_travPure t g = t pure g == (pure g :: Identity IGraph)
@@ -114,14 +115,10 @@ prop_ancesDesc g =
             in as `S.intersection` ds == S.empty) is
 
 
-test = fromLists [ (-7, 1)
-                 , (-4, -5)
-                 , (0, 3)
-                 , (6, 1)
-                 ]
-                 [ (HEdge (S.fromList [-7,-4,0,6]) (-4),0)
-                 , (HEdge (S.fromList [-7,-4,6]) (-4),-2)
-                 , (HEdge (S.fromList [-7,-4,6]) 0,-7)
+test = fromLists [(0,3), (3,0)]
+                 [ (HEdge (S.fromList []) 3, 2)
+                 , (HEdge (S.fromList [0]) 3, 1)
+                 -- , (HEdge (S.fromList [0, 3]) 3, 2)
                  ]
 
 -- 6 -> 0
