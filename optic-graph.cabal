@@ -17,6 +17,7 @@ library
                      , Data.Optic.Directed.HyperGraph
                      , Data.Optic.Undirected.Graph
                      , Data.Optic.Undirected.HyperGraph
+                     , Data.Optic.Internal.Graph
   build-depends:       base >= 4.7 && < 5
                      , lens
                      , containers
