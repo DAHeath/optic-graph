@@ -45,6 +45,7 @@ module Data.Optic.Internal.Graph
 
   , mapVert, imapVert
   , mapEdge, imapEdge
+  , mapIdx
 
   , foldVert, ifoldVert
   , foldEdge, ifoldEdge
@@ -52,6 +53,7 @@ module Data.Optic.Internal.Graph
 
   , travVert, itravVert
   , travEdge, itravEdge
+  , travIdx
 
   , idfs
   , idfsVert, idfsEdge
@@ -735,10 +737,10 @@ actionsToGraph fe fv acs = construct <$> traverse flat acs
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
-mapIdx :: Ord i' => (i -> i') -> Graph i e v -> Graph i' e v
+mapIdx :: (Ord i', OrdFunctor f, Ord (f i')) => (i -> i') -> Graph f i e v -> Graph f i' e v
 mapIdx f (Graph vs es) =
     Graph (M.mapKeys f vs)
-            (M.mapKeys f $ fmap (M.mapKeys f) es)
+          (M.mapKeys (omap f) es)
 
 mapVert :: (v -> v') -> Graph f i e v -> Graph f i e v'
 mapVert = fmap
@@ -795,6 +797,18 @@ itravEdge f g = getEdgeFocused <$> itraverse f (EdgeFocused g)
 
 itravEdge_ :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g ()
 itravEdge_ f = void . itravEdge f
+
+-- | Traverse the indices.
+-- The size of the result may be smaller if f maps two or more distinct indices to
+-- the same new index. In this case the value at the greatest of the original indices
+-- is retained.
+travIdx :: (Applicative g, Ord i, Ord i', OrdFunctor f, Ord (f i'))
+        => (i -> g i') -> Graph f i e v -> g (Graph f i' e v)
+travIdx f g = replace (idxs g) <$> traverse f (idxs g)
+  where
+    replace is is' =
+      let m = M.fromList (zip is is')
+      in mapIdx (\i -> m M.! i) g
 
 data Trav g f t i e e' v v' = Trav
   { getitrav :: (t i -> e -> f e')
