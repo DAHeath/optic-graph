@@ -4,8 +4,9 @@
            , FlexibleContexts
            , FlexibleInstances
            , UndecidableInstances
-           , MultiParamTypeClasses
            , RankNTypes
+           , FunctionalDependencies
+           , ScopedTypeVariables
            #-}
 
 module Data.Optic.Directed.Abstract where
@@ -15,6 +16,7 @@ import           Control.Monad.State
 
 import           Data.Bifoldable
 import           Data.Bitraversable
+import           Data.Foldable
 import           Data.Semigroup
 import           Data.Data (Data)
 import           Data.Set (Set)
@@ -25,20 +27,32 @@ import qualified Data.Map as M
 import           Test.QuickCheck.Arbitrary
 import qualified Test.QuickCheck.Gen as G
 
-class Mappable f where
-  mapIt :: Ord b => (a -> b) -> f a -> f b
+class (Ord t, Ord i, Ord (f i), Foldable f) => Source f i t | f i -> t where
+  toTarget :: f i -> t
+  fromTarget :: t -> f i
 
-instance Mappable Set where
-  mapIt = S.map
+instance Ord a => Source Set a (Set a) where
+  toTarget = id
+  fromTarget = id
 
-instance Mappable Identity where
-  mapIt = fmap
+instance Ord a => Source Identity a a where
+  toTarget = runIdentity
+  fromTarget = Identity
+
+class    Mappable f        where mapIt :: Ord b => (a -> b) -> f a -> f b
+instance Mappable Set      where mapIt = S.map
+instance Mappable Identity where mapIt = fmap
 
 data Graph f i e v = Graph
   { _vertMap :: Map i v
-  , _edgeMap :: Map (f i) (Map i e)
+  , _edgeMap' :: Map (f i) (Map i e)
   } deriving (Show, Read, Eq, Ord, Data)
 makeLenses ''Graph
+
+edgeMap :: Source f i t
+        => Lens (Graph f i e v) (Graph f i e' v)
+                (Map t (Map i e)) (Map t (Map i e'))
+edgeMap = edgeMap' . iso (M.mapKeys toTarget) (M.mapKeys fromTarget)
 
 -- | To simplify the implementation of traversals, we record the order in which
 -- the graph short be modified.
@@ -51,27 +65,29 @@ iallVerts :: IndexedTraversal i (Graph f i e v) (Graph f i e v') v v'
 iallVerts = vertMap . itraverse . indexed
 
 -- | A traversal which selects the edge between two indices.
-edge :: (Ord i, Ord (f i)) => f i -> i -> Traversal' (Graph f i e v) e
+edge :: Source f i t => t -> i -> Traversal' (Graph f i e v) e
 edge i1 i2 = edgeMap . ix i1 . ix i2
 
 -- | A traversal which selects all edges in the graph.
-allEdges :: Traversal (Graph f i e v) (Graph f i e' v) e e'
+allEdges :: Source f i t => Traversal (Graph f i e v) (Graph f i e' v) e e'
 allEdges = edgeMap . traverse . traverse
 
 -- | Indexed traversal of all edges in the graph.
-iallEdges :: IndexedTraversal (f i, i) (Graph f i e v) (Graph f i e' v) e e'
-iallEdges = edgeMap . map1 . indexed
-  where
-    map1 f = itraverse (map2 f)
-    map2 f i = itraverse (\i' -> f (i, i'))
+iallEdges :: Source f i t
+          => IndexedTraversal (t, i) (Graph f i e v) (Graph f i e' v) e e'
+iallEdges =
+  edgeMap .
+    (\f -> itraverse
+      (\i -> itraverse
+        (\i' -> f (i, i')))) . indexed
 
 -- | A traversal which selects all edges that come from a different index.
-edgesTo :: Ord i => i -> Traversal' (Graph f i e v) e
+edgesTo :: Source f i t => i -> Traversal' (Graph f i e v) e
 edgesTo = iedgesTo
 
 -- | Indexed traversal of the edges that come from a different index, labelled with
 -- the source index.
-iedgesTo :: Ord i => i -> IndexedTraversal' (f i) (Graph f i e v) e
+iedgesTo :: Source f i t => i -> IndexedTraversal' t (Graph f i e v) e
 iedgesTo i = edgeMap . itraverse . indexed <. ix i
 
 -- | Indices of the graph in ascending order.
@@ -86,25 +102,25 @@ idxSet = views vertMap M.keysSet
 empty :: Graph f i e v
 empty = Graph M.empty M.empty
 
-fromLists :: (Foldable f, Ord i, Ord (f i))
-          => [(i, v)] -> [(f i, i, e)] -> Graph f i e v
+fromLists :: Source f i t
+          => [(i, v)] -> [(t, i, e)] -> Graph f i e v
 fromLists = fromListsWith const const
 
-fromListsWith :: (Foldable f, Ord i, Ord (f i))
+fromListsWith :: Source f i t
               => (e -> e -> e) -> (v -> v -> v)
-              -> [(i, v)] -> [(f i, i, e)] -> Graph f i e v
+              -> [(i, v)] -> [(t, i, e)] -> Graph f i e v
 fromListsWith fe fv vs =
   foldr (\(i1, i2, e) -> addEdgeWith fe i1 i2 e) (foldr (uncurry (addVertWith fv)) empty vs)
 
-addEdgeWith :: (Foldable f, Ord i, Ord (f i))
-            => (e -> e -> e) -> f i -> i -> e -> Graph f i e v -> Graph f i e v
-addEdgeWith fe is1 i2 e g = g &
-  if all (\i1 -> has (ix i1) g) is1 && has (ix i2) g
-  then edgeMap . at is1 . non' _Empty %~ M.insertWith fe i2 e
+addEdgeWith :: forall f i t e v. Source f i t
+            => (e -> e -> e)
+            -> t -> i -> e -> Graph f i e v -> Graph f i e v
+addEdgeWith fe i1 i2 e g = g &
+  if all (\i -> has (ix i) g) (fromTarget i1 :: f i) && has (ix i2) g
+  then edgeMap . at i1 . non' _Empty %~ M.insertWith fe i2 e
   else id
 
-addEdge :: (Ord i, Foldable f, Ord (f i))
-        => f i -> i -> e -> Graph f i e v -> Graph f i e v
+addEdge :: Source f i t => t -> i -> e -> Graph f i e v -> Graph f i e v
 addEdge = addEdgeWith const
 
 addVert :: Ord i => i -> v -> Graph f i e v -> Graph f i e v
@@ -124,46 +140,47 @@ unionWith fe fv (Graph v1 f1) (Graph v2 f2) =
   Graph (M.unionWith fv v1 v2)
         (M.unionWith (M.unionWith fe) f1 f2)
 
-delVert :: (Eq v, Ord i) => v -> Graph f i e v -> Graph f i e v
+delVert :: (Eq v, Source f i t) => v -> Graph f i e v -> Graph f i e v
 delVert v = filterVerts (not . (==) v)
 
-delEdge :: (Ord i, Ord (f i))
-        => f i -> i -> Graph f i e v -> Graph f i e v
+delEdge :: Source f i t => t -> i -> Graph f i e v -> Graph f i e v
 delEdge i1 i2 = edgeMap . at i1 . non' _Empty . at i2 .~ Nothing
 
-delIdx :: Ord i => i -> Graph f i e v -> Graph f i e v
+delIdx :: Source f i t => i -> Graph f i e v -> Graph f i e v
 delIdx i g = g & vertMap %~ M.delete i
                -- & edgeMap %~ M.delete i -- TODO
                & edgeMap %~ M.mapMaybe ((non' _Empty %~ M.delete i) . Just)
 
-filterVerts :: Ord i => (v -> Bool) -> Graph f i e v -> Graph f i e v
+filterVerts :: Source f i t => (v -> Bool) -> Graph f i e v -> Graph f i e v
 filterVerts p = ifilterVerts (const p)
 
-ifilterVerts :: Ord i => (i -> v -> Bool) -> Graph f i e v -> Graph f i e v
+ifilterVerts :: Source f i t => (i -> v -> Bool) -> Graph f i e v -> Graph f i e v
 ifilterVerts p g =
   let meetsP = g & vertMap %~ M.filterWithKey p
   in foldr delIdx meetsP (idxSet g `S.difference` idxSet meetsP)
 
-filterEdges :: (Ord i, Ord (f i))
-            => (e -> Bool) -> Graph f i e v -> Graph f i e v
+filterEdges :: Source f i t => (e -> Bool) -> Graph f i e v -> Graph f i e v
 filterEdges p g =
-  foldr (\((i1, i2), e) -> if p e then delEdge i1 i2 else id) g (g ^@.. iallEdges)
+  foldr (\((i1, i2), e) ->
+    if p e then delEdge i1 i2 else id)
+    g (g ^@.. iallEdges)
 
-ifilterEdges :: (Ord i, Ord (f i))
-             => (f i -> i -> e -> Bool) -> Graph f i e v -> Graph f i e v
+ifilterEdges :: Source f i t => (t -> i -> e -> Bool) -> Graph f i e v -> Graph f i e v
 ifilterEdges p g =
-  foldr (\((i1, i2), e) -> if p i1 i2 e then delEdge i1 i2 else id) g (g ^@.. iallEdges)
+  foldr (\((i1, i2), e) ->
+    if p i1 i2 e then delEdge i1 i2 else id) g (g ^@.. iallEdges)
 
-filterIdxs :: Ord i => (i -> Bool) -> Graph f i e v -> Graph f i e v
+filterIdxs :: Source f i t => (i -> Bool) -> Graph f i e v -> Graph f i e v
 filterIdxs p g = foldr delIdx g (filter (not . p) (idxs g))
 
-cartesianProduct :: (Ord i3, Mappable f, Foldable f, Ord (f i3))
+cartesianProduct :: (Source f i1 t1, Source f i2 t2, Source f i3 t3, Mappable f)
                  => (i1 -> i2 -> i3)
                  -> (v1 -> v2 -> v3)
                  -> Graph f i1 e v1 -> Graph f i2 e v2 -> Graph f i3 e v3
 cartesianProduct = cartesianProductWith const const
 
-cartesianProductWith :: (Ord i3, Mappable f, Foldable f, Ord (f i3))
+cartesianProductWith :: forall f t1 t2 t3 i1 i2 i3 e v1 v2 v3
+                      . (Source f i1 t1, Source f i2 t2, Source f i3 t3, Mappable f)
                      => (e -> e -> e)
                      -> (v3 -> v3 -> v3)
                      -> (i1 -> i2 -> i3)
@@ -182,11 +199,11 @@ cartesianProductWith fe fv fi prod g1 g2 =
      es1' = do
        (i2, _) <- vs2
        ((is1, i1'), e) <- es1
-       return (mapIt (`fi` i2) is1, fi i1' i2, e)
+       return ((toTarget $ mapIt (`fi` i2) (fromTarget (is1 :: t1) :: f i1)) :: t3, fi i1' i2, e)
      es2' = do
        (i1, _) <- vs1
        ((is2, i2'), e) <- es2
-       return (mapIt (i1 `fi`) is2, fi i1 i2', e)
+       return ((toTarget $ mapIt (i1 `fi`) (fromTarget (is2 :: t2) :: f i2)) :: t3, fi i1 i2', e)
      in fromListsWith fe fv vs (es1' ++ es2')
 
 -- | The map obtained by applying f to each index of s.
@@ -223,7 +240,7 @@ instance (Ord i, Ord (f i)) => Monoid (Graph f i e v) where
   mappend = union
 
 instance (Ord i, Ord (f i)) => Semigroup (Graph f i e v)
-instance AsEmpty (Graph f i e v) where
+instance Source f i t => AsEmpty (Graph f i e v) where
   _Empty = nearly empty (\g -> null (g ^. vertMap) && null (g ^. edgeMap))
 
 instance Functor (Graph f i e) where
@@ -268,3 +285,75 @@ instance Ord i => Bitraversable (Graph f i) where
 --         e <- arbitrary
 --         return (i1, i2, e)
 --   shrink = const []
+
+-- | The successor indices for the given index.
+-- successors :: Ord i => i -> Graph f i e v -> Set i
+-- successors i = toListOf $ iedgesFrom i . asIndex
+
+-- | The predecessor indices for the given index.
+predecessors :: forall f i t e v. Source f i t => i -> Graph f i e v -> [i]
+predecessors i g =
+  concatMap (\i' -> toList (fromTarget i' :: f i)) $ g ^.. iedgesTo i . asIndex
+
+-- descendants :: Ord i => i -> Graph i e v -> [i]
+-- descendants i g = nub $ map (snd.fst) $ reached i g ^@.. iallEdges
+
+-- ancestors :: Ord i => i -> Graph i e v -> [i]
+-- ancestors i g = descendants i (reverse g)
+
+-- | The number of vertices in the graph.
+order :: Integral n => Graph f i e v -> n
+order = toEnum . lengthOf allVerts
+
+-- | The number of edges in the graph
+size :: (Source f i t, Integral n) => Graph f i e v -> n
+size = toEnum . lengthOf allEdges
+
+-- | Is there a vertex at the index?
+elemVert :: Ord i => i -> Graph f i e v -> Bool
+elemVert i g = not $ null (g ^? vertMap . ix i)
+
+-- | Is there an edge between the given indices?
+elemEdge :: Source f i t => t -> i -> Graph f i e v -> Bool
+elemEdge i1 i2 g = not $ null (g ^? edgeMap . ix i1 . ix i2)
+
+-- | Find the edges in the graph which travel against the ordering of the indices.
+backEdges :: forall f i t e v. Source f i t => Graph f i e v -> [((t, i), e)]
+backEdges g = filter (\((is1, i2), _) -> any (i2 <=) (fromTarget is1 :: f i)) $ g ^@.. iallEdges
+
+-- | Filter out backedges.
+withoutBackEdges :: Source f i t => Graph f i e v -> Graph f i e v
+withoutBackEdges g =
+  ifilterEdges (\i1 i2 _ -> (i1, i2) `notElem` map fst (backEdges g)) g
+
+-- | By default, graphs are "focused" on the vertices, meaning that common
+-- typeclass instances act on the vertices. EdgeFocused provides an alternative
+-- representation where the edges are the focus of the typeclasses.
+newtype EdgeFocused f i v e = EdgeFocused { getEdgeFocused :: Graph f i e v }
+  deriving (Show, Read, Eq, Ord, Data)
+
+-- | Isomorphism between the graph and its edge focused equivalent.
+edgeFocused :: Iso (Graph f i e v) (Graph f i' e' v')
+                   (EdgeFocused f i v e) (EdgeFocused f i' v' e')
+edgeFocused = iso EdgeFocused getEdgeFocused
+
+instance Source f i t => Functor (EdgeFocused f i v) where
+  fmap = over (from edgeFocused . edgeMap) . fmap . fmap
+
+instance Source f i t => Foldable (EdgeFocused f i v) where
+  foldr = foldrOf (from edgeFocused . allEdges)
+
+instance Source f i t => Traversable (EdgeFocused f i v) where
+  traverse = traverseOf (from edgeFocused . allEdges)
+
+instance (Source f i t, i ~ i', v ~ v')
+  => Each (EdgeFocused f i v e) (EdgeFocused f i' v' e') e e' where
+  each = traversed
+
+instance Source f i t => FunctorWithIndex (t, i) (EdgeFocused f i v)
+instance Source f i t => FoldableWithIndex (t, i) (EdgeFocused f i v)
+instance Source f i t => TraversableWithIndex (t, i) (EdgeFocused f i v) where
+  itraverse = itraverseOf (from edgeFocused . edgeMap . itraverse . mapT)
+    where
+      mapT :: Applicative g => Indexed (t, i) e (g e') -> t -> Map i e -> g (Map i e')
+      mapT i i1 = M.traverseWithKey (\i2 -> runIndexed i (i1, i2))
