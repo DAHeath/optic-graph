@@ -3,6 +3,7 @@ module Data.Optic.Directed.HyperGraph
   ( HEdge(..)
   , Graph
   , module Data.Optic.Internal.Graph
+  , delIdxSaveEdges
   ) where
 
 import           Control.Lens
