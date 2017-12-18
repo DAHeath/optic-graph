@@ -45,7 +45,7 @@ delIdxSaveEdges p i g =
   foldr (\(HEdge i1 i2, e) g' ->
         let newI = HEdge (S.filter (/= i) i1) i2 in
         g' & delEdge (HEdge i1 i2)
-           & if i `notElem` i1 && p newI e
+           & if i `notElem` i1 || p newI e
              then addEdge (HEdge (S.filter (/= i) i1) i2) e
              else id) g (g ^@.. iallEdges)
     & delIdx i
