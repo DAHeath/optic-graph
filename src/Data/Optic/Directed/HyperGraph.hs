@@ -38,9 +38,15 @@ instance (Arbitrary a, Ord a) => Arbitrary (HEdge a) where
 
 type Graph i e v = I.Graph HEdge i e v
 
-delIdxSaveEdges :: Ord i => i -> Graph i e v -> Graph i e v
-delIdxSaveEdges i g =
+-- | Delete the index from the graph. However, preserve any edges from that
+-- index which satisfy the predicate (after the index is removed from the hyperedge start).
+delIdxSaveEdges :: Ord i => (HEdge i -> e -> Bool) -> i -> Graph i e v -> Graph i e v
+delIdxSaveEdges p i g =
   foldr (\(HEdge i1 i2, e) g' ->
+        let newI = HEdge (S.filter (/= i) i1) i2
+        in
         g' & delEdge (HEdge i1 i2)
-           & addEdge (HEdge (S.filter (/= i) i1) i2) e) g (g ^@.. iallEdges)
+           & if p newI e
+             then addEdge (HEdge (S.filter (/= i) i1) i2) e
+             else id) g (g ^@.. iallEdges)
     & delIdx i
