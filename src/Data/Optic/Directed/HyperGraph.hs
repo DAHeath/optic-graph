@@ -36,3 +36,10 @@ instance (Arbitrary a, Ord a) => Arbitrary (HEdge a) where
   arbitrary = HEdge <$> arbitrary <*> arbitrary
 
 type Graph i e v = I.Graph HEdge i e v
+
+delIdxSaveEdges :: Ord i => i -> Graph i e v -> Graph i e v
+delIdxSaveEdges i g =
+  foldr (\(HEdge i1 i2, e) g' ->
+        g' & delEdge (HEdge i1 i2)
+           & addEdge (HEdge (S.filter (/= i) i1) i2) e) g (g ^@.. iallEdges)
+    & delIdx i

@@ -43,58 +43,58 @@ module Data.Optic.Internal.Graph
   , ibitraverse
   , reached, reaches, between
 
-  , mapVert, imapVert
-  , mapEdge, imapEdge
-  , mapIdx
+  , mapVerts, imapVerts
+  , mapEdges, imapEdges
+  , mapIdxs
 
-  , foldVert, ifoldVert
-  , foldEdge, ifoldEdge
-  , foldIdx
+  , foldVerts, ifoldVerts
+  , foldEdges, ifoldEdges
+  , foldIdxs
 
-  , travVert, itravVert
-  , travEdge, itravEdge
-  , travIdx
+  , travVerts, itravVerts
+  , travEdges, itravEdges
+  , travIdxs
 
   , idfs
-  , idfsVert, idfsEdge
-  , idfs_, idfsVert_, idfsEdge_
-  , dfs, dfsVert, dfsEdge
-  , dfs_, dfsVert_, dfsEdge_, dfsIdx_
+  , idfsVerts, idfsEdges
+  , idfs_, idfsVerts_, idfsEdges_
+  , dfs, dfsVerts, dfsEdges
+  , dfs_, dfsVerts_, dfsEdges_, dfsIdxs_
   , dfsIdxs
 
   , ibfs
-  , ibfsVert, ibfsEdge
-  , ibfs_, ibfsVert_, ibfsEdge_
-  , bfs, bfsVert, bfsEdge
-  , bfs_, bfsVert_, bfsEdge_, bfsIdx_
+  , ibfsVerts, ibfsEdges
+  , ibfs_, ibfsVerts_, ibfsEdges_
+  , bfs, bfsVerts, bfsEdges
+  , bfs_, bfsVerts_, bfsEdges_, bfsIdxs_
   , bfsIdxs
 
   , itop
-  , itopVert, itopEdge
-  , itop_, itopVert_, itopEdge_
-  , top, topVert, topEdge
-  , top_, topVert_, topEdge_, topIdx_
+  , itopVerts, itopEdges
+  , itop_, itopVerts_, itopEdges_
+  , top, topVerts, topEdges
+  , top_, topVerts_, topEdges_, topIdxs_
   , topIdxs
 
   , idfsFrom
-  , idfsFromVert, idfsFromEdge
-  , idfsFrom_, idfsFromVert_, idfsFromEdge_
-  , dfsFrom, dfsFromVert, dfsFromEdge
-  , dfsFrom_, dfsFromVert_, dfsFromEdge_, dfsFromIdx_
+  , idfsFromVerts, idfsFromEdges
+  , idfsFrom_, idfsFromVerts_, idfsFromEdges_
+  , dfsFrom, dfsFromVerts, dfsFromEdges
+  , dfsFrom_, dfsFromVerts_, dfsFromEdges_, dfsFromIdxs_
   , dfsFromIdxs
 
   , ibfsFrom
-  , ibfsFromVert, ibfsFromEdge
-  , ibfsFrom_, ibfsFromVert_, ibfsFromEdge_
-  , bfsFrom, bfsFromVert, bfsFromEdge
-  , bfsFrom_, bfsFromVert_, bfsFromEdge_, bfsFromIdx_
+  , ibfsFromVerts, ibfsFromEdges
+  , ibfsFrom_, ibfsFromVerts_, ibfsFromEdges_
+  , bfsFrom, bfsFromVerts, bfsFromEdges
+  , bfsFrom_, bfsFromVerts_, bfsFromEdges_, bfsFromIdxs_
   , bfsFromIdxs
 
   , ipath
-  , ipathVert, ipathEdge
-  , ipath_, ipathVert_, ipathEdge_
-  , path, pathVert, pathEdge
-  , path_, pathVert_, pathEdge_, pathIdx_
+  , ipathVerts, ipathEdges
+  , ipath_, ipathVerts_, ipathEdges_
+  , path, pathVerts, pathEdges
+  , path_, pathVerts_, pathEdges_, pathIdxs_
   , pathIdxs
   ) where
 
@@ -741,78 +741,78 @@ actionsToGraph fe fv acs = construct <$> traverse flat acs
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
-mapIdx :: (Ord i', OrdFunctor f, Ord (f i')) => (i -> i') -> Graph f i e v -> Graph f i' e v
-mapIdx f (Graph vs es) =
+mapIdxs :: (Ord i', OrdFunctor f, Ord (f i')) => (i -> i') -> Graph f i e v -> Graph f i' e v
+mapIdxs f (Graph vs es) =
     Graph (M.mapKeys f vs)
           (M.mapKeys (omap f) es)
 
-mapVert :: (v -> v') -> Graph f i e v -> Graph f i e v'
-mapVert = fmap
+mapVerts :: (v -> v') -> Graph f i e v -> Graph f i e v'
+mapVerts = fmap
 
 -- | Apply the given function to all vertices, taking each vertex's index as an
 -- additional argument.
-imapVert :: (i -> v -> v') -> Graph f i e v -> Graph f i e v'
-imapVert = imap
+imapVerts :: (i -> v -> v') -> Graph f i e v -> Graph f i e v'
+imapVerts = imap
 
 -- | Apply the given function to all edges.
-mapEdge :: Ord i => (e -> e') -> Graph f i e v -> Graph f i e' v
-mapEdge = under (from edgeFocused) . fmap
+mapEdges :: Ord i => (e -> e') -> Graph f i e v -> Graph f i e' v
+mapEdges = under (from edgeFocused) . fmap
 
 -- | Apply the given function to all edges, taking each edge's indices as
 -- additional arguments.
-imapEdge :: Ord i => (f i -> e -> e') -> Graph f i e v -> Graph f i e' v
-imapEdge = under (from edgeFocused) . imap
+imapEdges :: Ord i => (f i -> e -> e') -> Graph f i e v -> Graph f i e' v
+imapEdges = under (from edgeFocused) . imap
 
 -- | Aggregate the vertices.
-foldVert :: (v -> b -> b) -> b -> Graph f i e v -> b
-foldVert = foldr
+foldVerts :: (v -> b -> b) -> b -> Graph f i e v -> b
+foldVerts = foldr
 
 -- | Aggregate the vertices with the vertex index as an additional argument.
-ifoldVert :: (i -> v -> b -> b) -> b -> Graph f i e v -> b
-ifoldVert = ifoldr
+ifoldVerts :: (i -> v -> b -> b) -> b -> Graph f i e v -> b
+ifoldVerts = ifoldr
 
 -- | Aggregate the edges.
-foldEdge :: (e -> b -> b) -> b -> Graph f i e v -> b
-foldEdge f acc g = foldr f acc (EdgeFocused g)
+foldEdges :: (e -> b -> b) -> b -> Graph f i e v -> b
+foldEdges f acc g = foldr f acc (EdgeFocused g)
 
 -- | Aggregate the edges with the edge indices as additional arguments.
-ifoldEdge :: Ord i => (f i -> e -> b -> b) -> b -> Graph f i e v -> b
-ifoldEdge f acc g = ifoldr f acc (EdgeFocused g)
+ifoldEdges :: Ord i => (f i -> e -> b -> b) -> b -> Graph f i e v -> b
+ifoldEdges f acc g = ifoldr f acc (EdgeFocused g)
 
 -- | Aggregate the indices.
-foldIdx :: (i -> b -> b) -> b -> Graph f i e v -> b
-foldIdx f acc g = foldr f acc (idxs g)
+foldIdxs :: (i -> b -> b) -> b -> Graph f i e v -> b
+foldIdxs f acc g = foldr f acc (idxs g)
 
 -- | Traverse the vertices.
-travVert :: Applicative g => (v -> g v') -> Graph f i e v -> g (Graph f i e v')
-travVert = traverse
+travVerts :: Applicative g => (v -> g v') -> Graph f i e v -> g (Graph f i e v')
+travVerts = traverse
 
 -- | Indexed vertex traversal.
-itravVert :: Applicative g => (i -> v -> g v') -> Graph f i e v -> g (Graph f i e v')
-itravVert = itraverse
+itravVerts :: Applicative g => (i -> v -> g v') -> Graph f i e v -> g (Graph f i e v')
+itravVerts = itraverse
 
 -- | Traverse the edges.
-travEdge :: Applicative g => (e -> g e') -> Graph f i e v -> g (Graph f i e' v)
-travEdge = allEdges
+travEdges :: Applicative g => (e -> g e') -> Graph f i e v -> g (Graph f i e' v)
+travEdges = allEdges
 
 -- | Indexed edge traversal.
-itravEdge :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g (Graph f i e' v)
-itravEdge f g = getEdgeFocused <$> itraverse f (EdgeFocused g)
+itravEdges :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g (Graph f i e' v)
+itravEdges f g = getEdgeFocused <$> itraverse f (EdgeFocused g)
 
-itravEdge_ :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g ()
-itravEdge_ f = void . itravEdge f
+itravEdges_ :: (Ord i, Applicative g) => (f i -> e -> g e') -> Graph f i e v -> g ()
+itravEdges_ f = void . itravEdges f
 
 -- | Traverse the indices.
 -- The size of the result may be smaller if f maps two or more distinct indices to
 -- the same new index. In this case the value at the greatest of the original indices
 -- is retained.
-travIdx :: (Applicative g, Ord i, Ord i', OrdFunctor f, Ord (f i'))
+travIdxs :: (Applicative g, Ord i, Ord i', OrdFunctor f, Ord (f i'))
         => (i -> g i') -> Graph f i e v -> g (Graph f i' e v)
-travIdx f g = replace (idxs g) <$> traverse f (idxs g)
+travIdxs f g = replace (idxs g) <$> traverse f (idxs g)
   where
     replace is is' =
       let m = M.fromList (zip is is')
-      in mapIdx (\i -> m M.! i) g
+      in mapIdxs (\i -> m M.! i) g
 
 data Trav g f t i e e' v v' = Trav
   { getitrav :: (t i -> e -> f e')
@@ -905,86 +905,86 @@ pathTravs :: (Applicative f, Ord i, e' ~ e, v' ~ v, Ord (t i), Foldable t, Direc
           => i -> i -> Trav Maybe f t i e e' v v'
 pathTravs i1 i2 = mkTrav (ipath i1 i2)
 
-idfsVert      fv = runIdentity . getitravVert  dfsTravs    fv
-idfsEdge   fe    = runIdentity . getitravEdge  dfsTravs    fe
-idfs_      fe fv = runIdentity . getitrav_     dfsTravs    fe fv
-idfsVert_     fv = runIdentity . getitravVert_ dfsTravs       fv
-idfsEdge_  fe    = runIdentity . getitravEdge_ dfsTravs    fe
-dfs        fe fv = runIdentity . gettrav       dfsTravs    fe fv
-dfsVert       fv = runIdentity . gettravVert   dfsTravs       fv
-dfsEdge    fe    = runIdentity . gettravEdge   dfsTravs    fe
-dfs_       fe fv = runIdentity . gettrav_      dfsTravs    fe fv
-dfsVert_      fv = runIdentity . gettravVert_  dfsTravs       fv
-dfsEdge_   fe    = runIdentity . gettravEdge_  dfsTravs    fe
-dfsIdx_ fi       = runIdentity . gettravIdx_   dfsTravs fi
-dfsIdxs          = runIdentity . gettravIdxs   dfsTravs
+idfsVerts      fv = runIdentity . getitravVert  dfsTravs    fv
+idfsEdges   fe    = runIdentity . getitravEdge  dfsTravs    fe
+idfs_       fe fv = runIdentity . getitrav_     dfsTravs    fe fv
+idfsVerts_     fv = runIdentity . getitravVert_ dfsTravs       fv
+idfsEdges_  fe    = runIdentity . getitravEdge_ dfsTravs    fe
+dfs         fe fv = runIdentity . gettrav       dfsTravs    fe fv
+dfsVerts       fv = runIdentity . gettravVert   dfsTravs       fv
+dfsEdges    fe    = runIdentity . gettravEdge   dfsTravs    fe
+dfs_        fe fv = runIdentity . gettrav_      dfsTravs    fe fv
+dfsVerts_      fv = runIdentity . gettravVert_  dfsTravs       fv
+dfsEdges_   fe    = runIdentity . gettravEdge_  dfsTravs    fe
+dfsIdxs_ fi       = runIdentity . gettravIdx_   dfsTravs fi
+dfsIdxs           = runIdentity . gettravIdxs   dfsTravs
 
-ibfsVert      fv = runIdentity . getitravVert  bfsTravs       fv
-ibfsEdge   fe    = runIdentity . getitravEdge  bfsTravs    fe
-ibfs_      fe fv = runIdentity . getitrav_     bfsTravs    fe fv
-ibfsVert_     fv = runIdentity . getitravVert_ bfsTravs       fv
-ibfsEdge_  fe    = runIdentity . getitravEdge_ bfsTravs    fe
-bfs        fe fv = runIdentity . gettrav       bfsTravs    fe fv
-bfsVert       fv = runIdentity . gettravVert   bfsTravs       fv
-bfsEdge    fe    = runIdentity . gettravEdge   dfsTravs    fe
-bfs_       fe fv = runIdentity . gettrav_      bfsTravs    fe fv
-bfsVert_      fv = runIdentity . gettravVert_  bfsTravs       fv
-bfsEdge_   fe    = runIdentity . gettravEdge_  bfsTravs    fe
-bfsIdx_ fi       = runIdentity . gettravIdx_   bfsTravs fi
-bfsIdxs          = runIdentity . gettravIdxs   bfsTravs
+ibfsVerts      fv = runIdentity . getitravVert  bfsTravs       fv
+ibfsEdges   fe    = runIdentity . getitravEdge  bfsTravs    fe
+ibfs_       fe fv = runIdentity . getitrav_     bfsTravs    fe fv
+ibfsVerts_     fv = runIdentity . getitravVert_ bfsTravs       fv
+ibfsEdges_  fe    = runIdentity . getitravEdge_ bfsTravs    fe
+bfs         fe fv = runIdentity . gettrav       bfsTravs    fe fv
+bfsVerts       fv = runIdentity . gettravVert   bfsTravs       fv
+bfsEdges    fe    = runIdentity . gettravEdge   dfsTravs    fe
+bfs_        fe fv = runIdentity . gettrav_      bfsTravs    fe fv
+bfsVerts_      fv = runIdentity . gettravVert_  bfsTravs       fv
+bfsEdges_   fe    = runIdentity . gettravEdge_  bfsTravs    fe
+bfsIdxs_ fi       = runIdentity . gettravIdx_   bfsTravs fi
+bfsIdxs           = runIdentity . gettravIdxs   bfsTravs
 
-idfsFromVert i fv  = runIdentity . getitravVert (dfsFromTravs i) fv
-idfsFromEdge i fe  = runIdentity . getitravEdge (dfsFromTravs i) fe
-idfsFrom_ i fe fv  = runIdentity . getitrav_    (dfsFromTravs i) fe fv
-idfsFromVert_ i fv = runIdentity . getitravVert_ (dfsFromTravs i) fv
-idfsFromEdge_ i fe = runIdentity . getitravEdge_ (dfsFromTravs i) fe
-dfsFrom i fe fv    = runIdentity . gettrav (dfsFromTravs i) fe fv
-dfsFromVert i fv   = runIdentity . gettravVert (dfsFromTravs i) fv
-dfsFromEdge i fe   = runIdentity . gettravEdge (dfsFromTravs i) fe
-dfsFrom_ i fe fv   = runIdentity . gettrav_ (dfsFromTravs i) fe fv
-dfsFromVert_ i fv  = runIdentity . gettravVert_ (dfsFromTravs i) fv
-dfsFromEdge_ i fe  = runIdentity . gettravEdge_ (dfsFromTravs i) fe
-dfsFromIdx_ i fi   = runIdentity . gettravIdx_ (dfsFromTravs i) fi
-dfsFromIdxs i      = runIdentity . gettravIdxs (dfsFromTravs i)
+idfsFromVerts i fv  = runIdentity . getitravVert (dfsFromTravs i) fv
+idfsFromEdges i fe  = runIdentity . getitravEdge (dfsFromTravs i) fe
+idfsFrom_  i fe fv  = runIdentity . getitrav_    (dfsFromTravs i) fe fv
+idfsFromVerts_ i fv = runIdentity . getitravVert_ (dfsFromTravs i) fv
+idfsFromEdges_ i fe = runIdentity . getitravEdge_ (dfsFromTravs i) fe
+dfsFrom  i fe fv    = runIdentity . gettrav (dfsFromTravs i) fe fv
+dfsFromVerts i fv   = runIdentity . gettravVert (dfsFromTravs i) fv
+dfsFromEdges i fe   = runIdentity . gettravEdge (dfsFromTravs i) fe
+dfsFrom_  i fe fv   = runIdentity . gettrav_ (dfsFromTravs i) fe fv
+dfsFromVerts_ i fv  = runIdentity . gettravVert_ (dfsFromTravs i) fv
+dfsFromEdges_ i fe  = runIdentity . gettravEdge_ (dfsFromTravs i) fe
+dfsFromIdxs_ i fi   = runIdentity . gettravIdx_ (dfsFromTravs i) fi
+dfsFromIdxs  i      = runIdentity . gettravIdxs (dfsFromTravs i)
 
-ibfsFromVert i fv  = runIdentity . getitravVert (bfsFromTravs i) fv
-ibfsFromEdge i fe  = runIdentity . getitravEdge (bfsFromTravs i) fe
+ibfsFromVerts i fv  = runIdentity . getitravVert (bfsFromTravs i) fv
+ibfsFromEdges i fe  = runIdentity . getitravEdge (bfsFromTravs i) fe
 ibfsFrom_ i fe fv  = runIdentity . getitrav_ (bfsFromTravs i) fe fv
-ibfsFromVert_ i fv = runIdentity . getitravVert_ (bfsFromTravs i) fv
-ibfsFromEdge_ i fe = runIdentity . getitravEdge_ (bfsFromTravs i) fe
+ibfsFromVerts_ i fv = runIdentity . getitravVert_ (bfsFromTravs i) fv
+ibfsFromEdges_ i fe = runIdentity . getitravEdge_ (bfsFromTravs i) fe
 bfsFrom i fe fv    = runIdentity . gettrav (bfsFromTravs i) fe fv
-bfsFromVert i fv   = runIdentity . gettravVert (bfsFromTravs i) fv
-bfsFromEdge i fe   = runIdentity . gettravEdge (bfsFromTravs i) fe
+bfsFromVerts i fv   = runIdentity . gettravVert (bfsFromTravs i) fv
+bfsFromEdges i fe   = runIdentity . gettravEdge (bfsFromTravs i) fe
 bfsFrom_ i fe fv   = runIdentity . gettrav_ (bfsFromTravs i) fe fv
-bfsFromVert_ i fv  = runIdentity . gettravVert_ (bfsFromTravs i) fv
-bfsFromEdge_ i fe  = runIdentity . gettravEdge_ (bfsFromTravs i) fe
-bfsFromIdx_ i fi   = runIdentity . gettravIdx_ (bfsFromTravs i) fi
+bfsFromVerts_ i fv  = runIdentity . gettravVert_ (bfsFromTravs i) fv
+bfsFromEdges_ i fe  = runIdentity . gettravEdge_ (bfsFromTravs i) fe
+bfsFromIdxs_ i fi   = runIdentity . gettravIdx_ (bfsFromTravs i) fi
 bfsFromIdxs i      = runIdentity . gettravIdxs (bfsFromTravs i)
 
-itopVert  = getitravVert topTravs
-itopEdge  = getitravEdge topTravs
-itop_     = getitrav_ topTravs
-itopVert_ = getitravVert_ topTravs
-itopEdge_ = getitravEdge_ topTravs
-top       = gettrav topTravs
-topVert   = gettravVert topTravs
-topEdge   = gettravEdge dfsTravs
-top_      = gettrav_ topTravs
-topVert_  = gettravVert_ topTravs
-topEdge_  = gettravEdge_ topTravs
-topIdx_   = gettravIdx_ topTravs
-topIdxs   = gettravIdxs topTravs
+itopVerts  = getitravVert topTravs
+itopEdges  = getitravEdge topTravs
+itop_      = getitrav_ topTravs
+itopVerts_ = getitravVert_ topTravs
+itopEdges_ = getitravEdge_ topTravs
+top        = gettrav topTravs
+topVerts   = gettravVert topTravs
+topEdges   = gettravEdge dfsTravs
+top_       = gettrav_ topTravs
+topVerts_  = gettravVert_ topTravs
+topEdges_  = gettravEdge_ topTravs
+topIdxs_   = gettravIdx_ topTravs
+topIdxs    = gettravIdxs topTravs
 
-ipathVert  i1 i2 = getitravVert (pathTravs i1 i2)
-ipathEdge  i1 i2 = getitravEdge (pathTravs i1 i2)
-ipath_     i1 i2 = getitrav_ (pathTravs i1 i2)
-ipathVert_ i1 i2 = getitravVert_ (pathTravs i1 i2)
-ipathEdge_ i1 i2 = getitravEdge_ (pathTravs i1 i2)
-path       i1 i2 = gettrav (pathTravs i1 i2)
-pathVert   i1 i2 = gettravVert (pathTravs i1 i2)
-pathEdge   i1 i2 = gettravEdge dfsTravs
-path_      i1 i2 = gettrav_ (pathTravs i1 i2)
-pathVert_  i1 i2 = gettravVert_ (pathTravs i1 i2)
-pathEdge_  i1 i2 = gettravEdge_ (pathTravs i1 i2)
-pathIdx_   i1 i2 = gettravIdx_ (pathTravs i1 i2)
-pathIdxs   i1 i2 = gettravIdxs (pathTravs i1 i2)
+ipathVerts  i1 i2 = getitravVert (pathTravs i1 i2)
+ipathEdges  i1 i2 = getitravEdge (pathTravs i1 i2)
+ipath_      i1 i2 = getitrav_ (pathTravs i1 i2)
+ipathVerts_ i1 i2 = getitravVert_ (pathTravs i1 i2)
+ipathEdges_ i1 i2 = getitravEdge_ (pathTravs i1 i2)
+path        i1 i2 = gettrav (pathTravs i1 i2)
+pathVerts   i1 i2 = gettravVert (pathTravs i1 i2)
+pathEdges   i1 i2 = gettravEdge dfsTravs
+path_       i1 i2 = gettrav_ (pathTravs i1 i2)
+pathVerts_  i1 i2 = gettravVert_ (pathTravs i1 i2)
+pathEdges_  i1 i2 = gettravEdge_ (pathTravs i1 i2)
+pathIdxs_   i1 i2 = gettravIdx_ (pathTravs i1 i2)
+pathIdxs    i1 i2 = gettravIdxs (pathTravs i1 i2)
